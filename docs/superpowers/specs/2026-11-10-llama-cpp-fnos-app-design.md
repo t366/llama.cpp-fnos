@@ -140,7 +140,8 @@ llama-server（官方预编译二进制，按检测结果选变体）
 
 ### 4.2 数据与目录
 - 安装目录（fnOS 管理，只读使用）：应用代码 + 内置 CPU 二进制。
-- 数据目录（可配置，默认应用数据卷下，如共享文件夹更佳）：`models/`（GGUF）、`bin/<variant>/`（按需下载的加速版二进制 + cudart）、`config.json`、`logs/`、`downloads/`（.part 临时文件）。
+- 数据目录（**默认在应用数据卷下自动创建**）：`models/`（GGUF）、`bin/<variant>/`（按需下载的加速版二进制 + cudart）、`config.json`、`logs/`、`downloads/`（.part 临时文件）。
+- **模型目录可在设置页改为任意路径**（含飞牛共享文件夹），以覆盖"手动放 GGUF 到共享文件夹再扫描"的场景；切换即扫描新目录，不做拷贝。默认数据目录之外的路径，包用户读写权限以装机实测为准（共享文件夹通常对系统用户可读写）。
 - 卸载：默认保留数据目录（卸载说明中告知路径）；升级：覆盖安装不动数据。
 
 ### 4.3 硬件检测与变体选择（manager-server 内实现）
@@ -153,6 +154,7 @@ llama-server（官方预编译二进制，按检测结果选变体）
 
 ### 4.4 二进制获取（方案 A）
 - 构建期：`scripts/vendor-binaries.(sh/ps1)` 从**钉死的 nightly**（或用户 Gitea 镜像同路径）下载 CPU x64/arm64 包，解出 `llama-server` 与其依赖库放入打包目录。
+- **镜像维护交付物**：`scripts/sync-mirror-gitea`（用 Gitea API + token）把钉死 nightly 的全部所需资产（CPU/Vulkan/CUDA/cudart，x64+arm64）上传到用户 Gitea 上本仓库的 release，**沿用 GitHub `releases/download/<tag>/<file>` 路径约定**——运行期下载源解析逻辑对 GitHub 与 Gitea 镜像完全一致，仅 base URL 不同。镜像是否填充由用户自选（不填则运行期直接走 GitHub）。
 - 运行期：用户在"引擎"页点选/自动建议下载加速变体 → manager 从配置的下载源（默认 GitHub release URL，可改 Gitea 镜像 base URL）下载对应 tar.gz + cudart 包 → 解压到 `bin/<variant>/` → 校验可执行（`--version`）→ 切换。
 - 下载同样支持断点续传与进度查询；engine 升级 = 重新下载新版 nightly（记录版本号，保留旧变体目录可回退）。
 
