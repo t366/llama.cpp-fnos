@@ -169,6 +169,7 @@ llama-server（官方预编译二进制，按检测结果选变体）
 - `POST /api/models/download`（body: source, repo, file）→ 返回任务 id
 - `GET /api/tasks/<id>`（进度；**轮询**，不用 SSE——CGI 反代下流式不可靠）
 - 聊天页 iframe 直连 `http://<NAS主机>:<推理端口>/`
+- **聊天仅内网可用**（已定）：公网 HTTPS 打开飞牛桌面时，聊天页检测到非内网/HTTPS 上下文即显示"请从内网访问聊天"提示，不做 llama-server 反代；推理 API 本身公网可达性与否由用户端口映射决定，与聊天页无关
 
 ### 4.6 安全
 - manager 只听 127.0.0.1；唯一入口 /cgi/ThirdParty/llamacpp/ 走飞牛登录鉴权；不设 disable_authorization_path。
@@ -190,12 +191,16 @@ llama-server（官方预编译二进制，按检测结果选变体）
 构建流水（Windows 开发机）：`scripts/vendor-binaries`（下载钉死 nightly CPU 双架构产物）→ 拷贝源码进 fpk 模板 → `fnpack build`（x86 / arm 各一次，仅 platform 字段差异）→ 产出 `dist-fpk/llamacpp-<ver>-x86.fpk` 与 `-arm.fpk` + SHA256SUMS。
 
 ## 6. 风险与待装机验证项（builder 必须在真机上过一遍）
+
+**目标真机：192.168.0.114 = x86_64 + NVIDIA 独显（已确认）**——x86 包为主验收对象，CUDA 路径可真机端到端验证；ARM 包无法在该机验证，按代码审查 + 结构一致性交付。
+
 1. **glibc 兼容**：ubuntu-x64/arm64 nightly 产物在 fnOS 上 `ldd llama-server` 是否缺库/版本不足；失败则试更早 nightly（如 b12xxx 系列），再失败记录并上报（此时才讨论源码编译方案）。
 2. **安装路径与数据目录**：/var/apps 实际布局、可写数据卷路径的获取方式（环境变量/约定），以装机实测为准。
 3. **manifest category 合法值**：AutoPower 用 system；本应用尝试 ai/utility 类（装机报错则以 system 兜底）。
 4. **index.cgi 反代**：借 AutoPower 的 bash CGI 模式（静态 + curl 反代 /api/*），装机验证 POST/JSON/大响应体。
 5. **CGI 下轮询频率**：index.cgi 每次请求都起进程，轮询间隔 ≥1s，日志尾部接口加节流。
 6. **ModelScope / hf-mirror API 形态**：以实现时实测为准封装成小适配器；搜索失败降级另一源。
+7. **CUDA 真机验收**：nvidia-smi 驱动版本 → CUDA 12.8/13.5 变体选择逻辑实测；cudart 包解压后运行；`-ngl` 生效（日志确认 GPU offload 层数与显存占用）。
 
 ## 7. 里程碑
 - M1 fpk 骨架：空 manager + ui + 图标 + manifest，装机出桌面图标，入口鉴权可达（打通全部 FPK 链路）
@@ -215,5 +220,9 @@ llama-server（官方预编译二进制，按检测结果选变体）
 - 不使用 Docker（原生二进制，方案 A 分发）
 - 管理走飞牛鉴权；推理 API 独立局域网端口
 - 聊天复用 llama-server 自带 WebUI（iframe），不自研聊天界面
+- **聊天仅内网可用**；公网 HTTPS 下显示提示，不做 llama-server 反代
 - 卸载默认保留数据；中文界面
 - 代码托管于 192.168.0.114:3000 Gitea
+- **目标真机 192.168.0.114 为 x86_64 + NVIDIA 独显**；x86 包主验收，CUDA 路径真机端到端验证
+- 数据目录默认在应用数据卷自动创建；模型目录可在设置页改指向共享文件夹（builder 拍板，需求方可否决）
+- Gitea 镜像由本项目提供 `scripts/sync-mirror-gitea` 同步脚本，沿用 GitHub release 路径约定；是否填充镜像由需求方自选（builder 拍板，需求方可否决）
