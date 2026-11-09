@@ -1,0 +1,13 @@
+{
+    ".url": {
+        "llamacpp.Application": {
+            "title": "llama.cpp",
+            "desc": "本地大模型推理服务",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "url": "/cgi/ThirdParty/llamacpp/index.cgi/",
+            "allUsers": true
+        }
+    }
+}

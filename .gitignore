@@ -1,0 +1,18 @@
+# 构建产物与本地工具
+dist-fpk/
+tools/
+ref/
+demoapp/
+
+# vendor 的 llama.cpp 二进制（构建时由 scripts/vendor-binaries.ps1 下载填充）
+fpk/app/bin/
+
+# Python
+__pycache__/
+*.pyc
+
+# 本地杂物
+*.log
+.DS_Store
+
+build/

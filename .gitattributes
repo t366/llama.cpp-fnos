@@ -1,0 +1,7 @@
+# fpk 内的 bash/CGI 脚本必须保持 LF（CRLF 会导致 fnOS 上 bash 报错）
+fpk/cmd/* text eol=lf
+fpk/app/ui/index.cgi text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.cgi text eol=lf
+manifest text eol=lf

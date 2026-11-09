@@ -1,0 +1,84 @@
+#!/bin/bash
+# llamacpp 服务主入口（fnOS 生命周期脚本：start / stop / status）
+# 由 fnOS 以包用户运行；负责拉起并守护 manager-server（Python 3 标准库实现）。
+set -e
+
+# fnOS 注入的环境变量，缺失时按装机默认路径兜底
+APP_DIR="${TRIM_APPDEST:-/var/apps/llamacpp/target}"
+DATA_DIR="${TRIM_PKGVAR:-/var/apps/llamacpp/var}"
+PORT="${TRIM_SERVICE_PORT:-18080}"
+
+PID_FILE="${DATA_DIR}/manager.pid"
+LOG_FILE="${DATA_DIR}/manager.log"
+LOG_MAX_BYTES=1048576
+
+mkdir -p "$DATA_DIR"
+
+is_running() {
+  if [ -f "$PID_FILE" ]; then
+    PID="$(cat "$PID_FILE")"
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+case "${1:-}" in
+  start)
+    if is_running; then
+      exit 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+      echo "llamacpp 需要系统自带的 python3，但未找到。" >&2
+      [ -n "${TRIM_TEMP_LOGFILE:-}" ] && echo "llamacpp 需要系统自带的 python3，但未找到。" >> "$TRIM_TEMP_LOGFILE"
+      exit 1
+    fi
+    # 简单日志轮转：超过 1MB 保留一份旧日志
+    if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE")" -gt "$LOG_MAX_BYTES" ]; then
+      mv -f "$LOG_FILE" "$LOG_FILE.1"
+    fi
+    nohup python3 "$APP_DIR/manager/server.py" \
+      --host 127.0.0.1 --port "$PORT" \
+      --app-dir "$APP_DIR" --data-dir "$DATA_DIR" \
+      >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+    sleep 1
+    if ! is_running; then
+      echo "llamacpp 服务启动失败，请查看日志 $LOG_FILE" >&2
+      [ -n "${TRIM_TEMP_LOGFILE:-}" ] && tail -n 20 "$LOG_FILE" >> "$TRIM_TEMP_LOGFILE"
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+    ;;
+
+  stop)
+    if is_running; then
+      PID="$(cat "$PID_FILE")"
+      # manager 收到 TERM 会自行结束 llama-server 子进程后退出
+      kill -TERM "$PID" 2>/dev/null || true
+      for _ in 1 2 3 4 5; do
+        if ! kill -0 "$PID" 2>/dev/null; then
+          break
+        fi
+        sleep 1
+      done
+      # 5 秒内未退出才强制结束，避免误杀已复用该 PID 的其他进程
+      if kill -0 "$PID" 2>/dev/null; then
+        kill -9 "$PID" 2>/dev/null || true
+      fi
+    fi
+    rm -f "$PID_FILE"
+    ;;
+
+  status)
+    if is_running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+
+  *)
+    exit 1
+    ;;
+esac
