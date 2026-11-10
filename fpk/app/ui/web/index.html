@@ -8,58 +8,381 @@
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    margin: 0; min-height: 100vh;
     font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: #f2f4f8; color: #1f2733;
+    background: #f2f4f8; color: #1f2733; font-size: 14px;
   }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; }
+  header.bar {
+    display: flex; align-items: center; gap: 10px; padding: 4px 2px 14px;
+  }
+  header.bar .logo { font-size: 26px; }
+  header.bar h1 { font-size: 18px; margin: 0; flex: 1; }
+  header.bar .ver { color: #98a2b0; font-size: 12px; }
+  nav.tabs { display: flex; gap: 4px; background: #e6e9ef; padding: 4px; border-radius: 10px; margin-bottom: 16px; }
+  nav.tabs button {
+    flex: 1; border: 0; background: transparent; padding: 8px 0; border-radius: 7px;
+    font-size: 14px; color: #5a6472; cursor: pointer; font-family: inherit;
+  }
+  nav.tabs button.active { background: #fff; color: #1f2733; font-weight: 600; box-shadow: 0 1px 3px rgba(15,35,70,.12); }
+  section.page { display: none; }
+  section.page.active { display: block; }
   .card {
-    background: #fff; border-radius: 16px; padding: 40px 48px; max-width: 460px; width: calc(100% - 32px);
-    box-shadow: 0 8px 30px rgba(15, 35, 70, .08); text-align: center;
+    background: #fff; border-radius: 14px; padding: 18px 20px; margin-bottom: 14px;
+    box-shadow: 0 4px 16px rgba(15, 35, 70, .06);
   }
-  .logo { font-size: 40px; line-height: 1; margin-bottom: 12px; }
-  h1 { font-size: 22px; margin: 0 0 6px; }
-  .sub { color: #6b7686; font-size: 13px; margin-bottom: 28px; }
-  .status {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 10px 18px; border-radius: 999px; font-size: 14px;
-    background: #f0f2f5; color: #6b7686;
+  .card h2 { font-size: 15px; margin: 0 0 14px; color: #333c49; }
+  /* 引擎状态 */
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;
+    border-radius: 999px; background: #f0f2f5; color: #5a6472; font-size: 14px; font-weight: 600;
   }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #c0c8d2; }
-  .status.ok { background: #e8f7ee; color: #1c7c46; }
-  .status.ok .dot { background: #2bb45e; animation: pulse 1.6s infinite; }
-  .status.err { background: #fdeeee; color: #b4332f; }
-  .status.err .dot { background: #d9534f; }
+  .badge .dot { width: 9px; height: 9px; border-radius: 50%; background: #c0c8d2; }
+  .badge.running { background: #e8f7ee; color: #1c7c46; }
+  .badge.running .dot { background: #2bb45e; animation: pulse 1.6s infinite; }
+  .badge.starting { background: #fff7e6; color: #9a6b00; }
+  .badge.starting .dot { background: #f0a800; animation: pulse 1.2s infinite; }
+  .badge.stopping { background: #fff7e6; color: #9a6b00; }
+  .badge.stopping .dot { background: #f0a800; }
+  .badge.error { background: #fdeeee; color: #b4332f; }
+  .badge.error .dot { background: #d9534f; }
   @keyframes pulse { 50% { opacity: .35; } }
-  .meta { margin-top: 18px; font-size: 12px; color: #98a2b0; }
+  .btns { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  button.act {
+    border: 0; border-radius: 9px; padding: 9px 20px; font-size: 14px; cursor: pointer;
+    font-family: inherit; background: #e6e9ef; color: #333c49;
+  }
+  button.act.primary { background: #2f6fed; color: #fff; }
+  button.act.danger { background: #fdecec; color: #b4332f; }
+  button.act:disabled { opacity: .45; cursor: not-allowed; }
+  .grid { display: grid; grid-template-columns: 96px 1fr; gap: 6px 12px; margin-top: 16px; font-size: 13px; }
+  .grid .k { color: #7b8494; }
+  .grid .v { word-break: break-all; }
+  .alert { border-radius: 9px; padding: 10px 14px; margin-top: 12px; font-size: 13px; display: none; }
+  .alert.show { display: block; }
+  .alert.err { background: #fdeeee; color: #b4332f; }
+  .alert.info { background: #eef4fd; color: #2757b4; }
+  /* 日志 */
+  .logtools { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .logtools label { font-size: 13px; color: #5a6472; display: flex; align-items: center; gap: 5px; }
+  pre.log {
+    background: #10141b; color: #c7d0dc; border-radius: 10px; padding: 14px;
+    font-size: 12px; line-height: 1.55; margin: 0; max-height: 420px; overflow: auto;
+    white-space: pre-wrap; word-break: break-all; font-family: Consolas, Menlo, monospace;
+  }
+  /* 设置表单 */
+  .form-row { display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px; align-items: center; margin-bottom: 12px; }
+  .form-row label { color: #5a6472; font-size: 13px; }
+  .form-row .hint { grid-column: 2; font-size: 12px; color: #98a2b0; margin-top: -4px; }
+  .form-row input[type=text], .form-row input[type=number], .form-row input[type=password], .form-row select {
+    width: 100%; padding: 8px 10px; border: 1px solid #d5dae2; border-radius: 8px;
+    font-size: 14px; font-family: inherit; background: #fff; color: #1f2733;
+  }
+  .form-row input:focus, .form-row select:focus { outline: 2px solid #2f6fed33; border-color: #2f6fed; }
+  .toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+    background: #1f2733; color: #fff; padding: 10px 22px; border-radius: 999px;
+    font-size: 13px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 99;
+    max-width: 90%; word-break: break-all;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .empty { color: #98a2b0; font-size: 13px; padding: 8px 0; }
 </style>
 </head>
 <body>
-  <div class="card">
+<div class="wrap">
+  <header class="bar">
     <div class="logo">🦙</div>
     <h1>llama.cpp 本地大模型</h1>
-    <div class="sub">M1 链路验证版 —— 桌面入口、飞牛鉴权与后端连通性检查</div>
-    <div class="status" id="status"><span class="dot"></span><span id="statusText">正在连接管理服务…</span></div>
-    <div class="meta" id="meta"></div>
-  </div>
+    <div class="ver" id="ver"></div>
+  </header>
+
+  <nav class="tabs">
+    <button data-page="status" class="active">状态</button>
+    <button data-page="logs">日志</button>
+    <button data-page="settings">设置</button>
+  </nav>
+
+  <!-- 状态页 -->
+  <section class="page active" id="page-status">
+    <div class="card">
+      <h2>推理引擎</h2>
+      <div class="badge" id="engineBadge"><span class="dot"></span><span id="engineState">…</span></div>
+      <div class="btns">
+        <button class="act primary" id="btnStart">启动</button>
+        <button class="act danger" id="btnStop">停止</button>
+        <button class="act" id="btnRestart">重启</button>
+      </div>
+      <div class="alert err" id="engineErr"></div>
+      <div class="grid" id="engineGrid"></div>
+    </div>
+    <div class="card">
+      <h2>OpenAI 兼容 API</h2>
+      <div class="grid" id="apiGrid"></div>
+      <div class="alert info" id="lanTip" style="display:none">
+        引擎运行中：局域网设备可通过上方 Base URL 调用 /v1/chat/completions（在 Chatbox 等客户端填入即可）。
+      </div>
+    </div>
+  </section>
+
+  <!-- 日志页 -->
+  <section class="page" id="page-logs">
+    <div class="card">
+      <h2>llama-server 日志（尾部）</h2>
+      <div class="logtools">
+        <button class="act" id="btnLogRefresh">刷新</button>
+        <label><input type="checkbox" id="logAuto" checked> 自动刷新（2 秒）</label>
+      </div>
+      <pre class="log" id="logBox">（暂无日志）</pre>
+    </div>
+  </section>
+
+  <!-- 设置页 -->
+  <section class="page" id="page-settings">
+    <div class="card">
+      <h2>引擎设置</h2>
+      <div class="form-row">
+        <label>模型路径</label>
+        <input type="text" id="fModel" placeholder="/vol1/.../model-Q4_K_M.gguf">
+        <div class="hint">GGUF 文件的绝对路径；位于共享文件夹时可直接粘贴路径</div>
+      </div>
+      <div class="form-row">
+        <label>推理端口</label>
+        <input type="number" id="fPort" min="1024" max="65535">
+        <div class="hint">OpenAI 兼容 API 监听端口（默认 8080）</div>
+      </div>
+      <div class="form-row">
+        <label>监听地址</label>
+        <select id="fBind">
+          <option value="0.0.0.0">0.0.0.0（局域网可访问）</option>
+          <option value="127.0.0.1">127.0.0.1（仅本机）</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>上下文长度</label>
+        <input type="number" id="fCtx" min="256">
+      </div>
+      <div class="form-row">
+        <label>线程数</label>
+        <input type="number" id="fThreads" min="0" max="256">
+        <div class="hint">0 = 交由 llama.cpp 自动选择</div>
+      </div>
+      <div class="form-row">
+        <label>GPU 层数</label>
+        <input type="number" id="fNgl" min="0" max="999">
+        <div class="hint">--n-gpu-layers；CPU 变体保持 0，加速变体按显存设置</div>
+      </div>
+      <div class="form-row">
+        <label>API Key</label>
+        <input type="password" id="fApiKey" placeholder="留空则不启用鉴权">
+        <div class="hint">启用后局域网调用需携带此 Key，可防止局域网滥用</div>
+      </div>
+      <div class="form-row">
+        <label>模型目录</label>
+        <input type="text" id="fModelsDir" placeholder="留空 = 应用数据目录下 models/">
+        <div class="hint">模型扫描根目录，可指向飞牛共享文件夹（M3 生效）</div>
+      </div>
+      <div class="form-row">
+        <label>崩溃自动重启</label>
+        <label style="display:flex;align-items:center;gap:6px;color:#1f2733">
+          <input type="checkbox" id="fAutoRestart"> 启用
+        </label>
+      </div>
+      <div class="btns">
+        <button class="act primary" id="btnSave">保存设置</button>
+      </div>
+      <div class="alert info" id="saveNote" style="display:none">修改端口/参数后，需重启引擎生效。</div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
 <script>
-  // 接口走相对路径：经 /cgi/ThirdParty/llamacpp/index.cgi/ 反代到 manager
-  fetch("api/status")
-    .then(function (r) {
-      if (!r.ok) { throw new Error("HTTP " + r.status); }
-      return r.json();
-    })
-    .then(function (d) {
-      var el = document.getElementById("status");
-      el.classList.add("ok");
-      document.getElementById("statusText").textContent = "管理服务已连通";
-      document.getElementById("meta").textContent =
-        d.app + " v" + d.version + " · " + d.milestone + " · " + d.service;
-    })
-    .catch(function (e) {
-      var el = document.getElementById("status");
-      el.classList.add("err");
-      document.getElementById("statusText").textContent = "管理服务未连通：" + e.message;
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { engine: null, settings: null, dirty: false };
+  var timers = { status: null, logs: null };
+
+  function toast(msg) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.classList.remove("show"); }, 2600);
+  }
+
+  function api(method, url, body) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(url, opts).then(function (r) {
+      return r.json().catch(function () { throw new Error("HTTP " + r.status); });
     });
+  }
+
+  // ---------- 页签 ----------
+  var tabBtns = document.querySelectorAll("nav.tabs button");
+  tabBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      tabBtns.forEach(function (b) { b.classList.remove("active"); });
+      btn.classList.add("active");
+      document.querySelectorAll("section.page").forEach(function (p) { p.classList.remove("active"); });
+      $("page-" + btn.dataset.page).classList.add("active");
+    });
+  });
+
+  // ---------- 状态页 ----------
+  var STATE_TEXT = { stopped: "已停止", starting: "启动中…", running: "运行中", stopping: "停止中…", error: "异常退出" };
+
+  function renderEngine(e) {
+    var badge = $("engineBadge");
+    badge.className = "badge " + e.state;
+    $("engineState").textContent = STATE_TEXT[e.state] || e.state;
+    $("btnStart").disabled = (e.state === "starting" || e.state === "running" || e.state === "stopping");
+    $("btnStop").disabled = (e.state === "stopped" || e.state === "stopping" || e.state === "starting");
+    $("btnRestart").disabled = (e.state !== "running");
+    var err = $("engineErr");
+    if (e.state === "error") {
+      err.textContent = "引擎异常退出（exit code=" + (e.exit_code === null ? "?" : e.exit_code) +
+        "）。常见原因：模型路径不存在、端口被占用、参数非法。请查看日志页。";
+      err.classList.add("show");
+    } else { err.classList.remove("show"); }
+
+    var rows = [
+      ["变体", e.variant],
+      ["二进制目录", e.variant_dir || "未找到"],
+      ["模型", e.model || "未配置"],
+      ["监听", e.bind + ":" + e.port],
+      ["进程 PID", e.pid || "—"],
+      ["运行时长", e.uptime_s !== null && e.uptime_s !== undefined ? fmtDur(e.uptime_s) : "—"],
+      ["崩溃自动重启", e.auto_restart ? "开启" : "关闭"],
+      ["连续崩溃", String(e.crash_count)]
+    ];
+    $("engineGrid").innerHTML = rows.map(function (r) {
+      return '<div class="k">' + r[0] + '</div><div class="v">' + esc(r[1]) + "</div>";
+    }).join("");
+
+    var apiRows = [
+      ["Base URL", "http://" + location.hostname + ":" + e.port + "/v1"],
+      ["WebUI", "http://" + location.hostname + ":" + e.port + "/"],
+      ["API Key", state.settings && state.settings.api_key ? "已启用" : "未启用"]
+    ];
+    $("apiGrid").innerHTML = apiRows.map(function (r) {
+      return '<div class="k">' + r[0] + '</div><div class="v">' + esc(r[1]) + "</div>";
+    }).join("");
+    $("lanTip").style.display = (e.state === "running") ? "" : "none";
+  }
+
+  function fmtDur(s) {
+    if (s < 60) return s + " 秒";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + " 分 " + (s % 60) + " 秒";
+    return Math.floor(m / 60) + " 时 " + (m % 60) + " 分";
+  }
+
+  function esc(v) {
+    return String(v === null || v === undefined ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function refreshStatus() {
+    return api("GET", "api/status").then(function (d) {
+      state.engine = d.engine;
+      $("ver").textContent = "v" + d.version + " · " + d.milestone;
+      renderEngine(d.engine);
+      if (!state.settings) { /* settings 由设置页独立拉取 */ }
+    }).catch(function (e) {
+      $("engineState").textContent = "管理服务未连通：" + e.message;
+      $("engineBadge").className = "badge error";
+    });
+  }
+
+  function engineAction(action) {
+    return api("POST", "api/engine/" + action).then(function (d) {
+      if (d.engine) { state.engine = d.engine; renderEngine(d.engine); }
+      if (!d.ok) { toast(d.error || "操作失败"); }
+      else { toast({ start: "启动指令已下发", stop: "已停止", restart: "重启完成" }[action]); }
+      refreshStatus();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  }
+
+  $("btnStart").addEventListener("click", function () { engineAction("start"); });
+  $("btnStop").addEventListener("click", function () { engineAction("stop"); });
+  $("btnRestart").addEventListener("click", function () { engineAction("restart"); });
+
+  // ---------- 日志页 ----------
+  function refreshLogs() {
+    return api("GET", "api/engine/logs?tail=400").then(function (d) {
+      var box = $("logBox");
+      var lines = d.lines || [];
+      box.textContent = lines.length ? lines.join("\n") : "（暂无日志）";
+      box.scrollTop = box.scrollHeight;
+    }).catch(function () {});
+  }
+  $("btnLogRefresh").addEventListener("click", refreshLogs);
+  $("logAuto").addEventListener("change", function () {
+    if (this.checked) { timers.logs = setInterval(refreshLogs, 2000); }
+    else { clearInterval(timers.logs); timers.logs = null; }
+  });
+  if ($("logAuto").checked) { timers.logs = setInterval(refreshLogs, 2000); }
+
+  // ---------- 设置页 ----------
+  function fillSettings(s) {
+    state.settings = s;
+    $("fModel").value = s.model || "";
+    $("fPort").value = s.inference_port;
+    $("fBind").value = s.bind;
+    $("fCtx").value = s.ctx_size;
+    $("fThreads").value = s.threads;
+    $("fNgl").value = s.ngl;
+    $("fApiKey").value = s.api_key || "";
+    $("fModelsDir").value = s.models_dir || "";
+    $("fAutoRestart").checked = !!s.auto_restart;
+    state.dirty = false;
+  }
+
+  function loadSettings() {
+    return api("GET", "api/settings").then(function (d) {
+      fillSettings(d.settings);
+    }).catch(function (e) { toast("读取设置失败：" + e.message); });
+  }
+
+  $("btnSave").addEventListener("click", function () {
+    var payload = {
+      model: $("fModel").value.trim(),
+      inference_port: parseInt($("fPort").value, 10),
+      bind: $("fBind").value,
+      ctx_size: parseInt($("fCtx").value, 10),
+      threads: parseInt($("fThreads").value, 10),
+      ngl: parseInt($("fNgl").value, 10),
+      api_key: $("fApiKey").value,
+      models_dir: $("fModelsDir").value.trim(),
+      auto_restart: $("fAutoRestart").checked
+    };
+    if (isNaN(payload.inference_port) || isNaN(payload.ctx_size) ||
+        isNaN(payload.threads) || isNaN(payload.ngl)) {
+      toast("数值字段请填写有效数字");
+      return;
+    }
+    api("PUT", "api/settings", payload).then(function (d) {
+      if (!d.ok) { toast("保存失败：" + (d.error || "未知错误")); return; }
+      fillSettings(d.settings);
+      $("saveNote").style.display = "";
+      toast("设置已保存");
+      refreshStatus();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  });
+
+  // 输入即视为脏：提示需重启引擎的横幅仅在保存后出现一次，无需额外逻辑
+
+  // ---------- 启动 ----------
+  refreshStatus();
+  loadSettings();
+  timers.status = setInterval(refreshStatus, 2000);
+})();
 </script>
 </body>
 </html>
