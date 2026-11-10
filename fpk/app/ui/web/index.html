@@ -101,6 +101,39 @@
     width: 100%; height: clamp(360px, calc(100vh - 230px), 720px);
     border: 0; border-radius: 10px; background: #fff; display: none;
   }
+  /* M4：硬件/市场/任务 */
+  .h2row { display: flex; align-items: center; justify-content: space-between; }
+  .h2row h2 { margin: 0; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px;
+         background: #eef4fd; color: #2757b4; margin-left: 6px; }
+  .tag.ok { background: #e8f7ee; color: #1c7c46; }
+  .tag.rec { background: #fff7e6; color: #9a6b00; }
+  .market-bar { display: flex; gap: 8px; }
+  .market-bar select, .market-bar input[type=text] {
+    flex: 0 0 auto; padding: 8px 10px; border: 1px solid #d5dae2; border-radius: 8px;
+    font-size: 14px; font-family: inherit; background: #fff; color: #1f2733;
+  }
+  .market-bar input[type=text] { flex: 1; min-width: 0; }
+  .market-bar input:focus, .market-bar select:focus { outline: 2px solid #2f6fed33; border-color: #2f6fed; }
+  .repo-row { padding: 11px 0; border-bottom: 1px solid #eef0f4; cursor: pointer; }
+  .repo-row:last-child { border-bottom: 0; }
+  .file-row { display: flex; align-items: center; gap: 10px; padding: 8px 0 8px 14px;
+              border-bottom: 1px dashed #eef0f4; font-size: 13px; }
+  .file-row:last-child { border-bottom: 0; }
+  .file-row .f-name { flex: 1; min-width: 0; word-break: break-all; }
+  .file-row .f-size { color: #7b8494; flex-shrink: 0; font-size: 12px; }
+  .taskrow { padding: 10px 0; border-bottom: 1px solid #eef0f4; }
+  .taskrow:last-child { border-bottom: 0; }
+  .tk-head { display: flex; align-items: center; gap: 8px; }
+  .tk-name { flex: 1; min-width: 0; word-break: break-all; font-weight: 600; font-size: 13px; }
+  .tk-state { font-size: 12px; color: #7b8494; flex-shrink: 0; }
+  .tk-state.run { color: #2757b4; }
+  .tk-state.done { color: #1c7c46; }
+  .tk-state.error, .tk-state.canceled { color: #b4332f; }
+  .track { height: 7px; background: #edf0f5; border-radius: 999px; margin: 7px 0 5px; overflow: hidden; }
+  .fill { height: 100%; background: #2f6fed; border-radius: 999px; transition: width .4s; }
+  .tk-meta { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #98a2b0; }
+  .tk-meta .tk-err { color: #b4332f; word-break: break-all; flex: 1; }
 </style>
 </head>
 <body>
@@ -139,6 +172,24 @@
         引擎运行中：局域网设备可通过上方 Base URL 调用 /v1/chat/completions（在 Chatbox 等客户端填入即可）。
       </div>
     </div>
+    <div class="card">
+      <div class="h2row">
+        <h2>硬件与加速变体</h2>
+        <button class="act small" id="btnRedetect">重新检测</button>
+      </div>
+      <div class="grid" id="hwGrid"></div>
+      <div class="form-row" style="margin-top:14px">
+        <label>引擎变体</label>
+        <select id="fVariant"></select>
+        <div class="hint">已装变体可直接启用；未装变体选中后点「安装」，按需从 GitHub / Gitea 镜像下载</div>
+      </div>
+      <div class="btns">
+        <button class="act primary" id="btnInstallVariant">安装选中变体</button>
+        <button class="act" id="btnUseVariant">启用已装变体</button>
+      </div>
+      <div class="alert err" id="variantErr"></div>
+      <div id="variantTask"></div>
+    </div>
   </section>
 
   <!-- 模型页 -->
@@ -157,6 +208,26 @@
     <div class="card">
       <h2>已发现模型 <span class="count" id="modelCount"></span></h2>
       <div id="modelList"><div class="empty">点击「重新扫描」开始查找 .gguf 文件</div></div>
+    </div>
+    <div class="card">
+      <h2>模型市场</h2>
+      <div class="market-bar">
+        <select id="mSource">
+          <option value="modelscope">ModelScope</option>
+          <option value="hf">HF 镜像</option>
+        </select>
+        <input type="text" id="mQuery" placeholder="搜索模型，如 qwen3">
+        <button class="act primary small" id="btnMarketSearch">搜索</button>
+      </div>
+      <div id="marketList"><div class="empty">输入关键词搜索在线模型仓库（点击仓库查看 GGUF 文件）</div></div>
+      <div id="marketFiles" style="display:none">
+        <div class="m-meta" id="mfRepo" style="margin-bottom:4px"></div>
+        <div id="mfList"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>下载任务 <span class="count" id="taskCount"></span></h2>
+      <div id="taskList"><div class="empty">暂无任务</div></div>
     </div>
   </section>
 
@@ -234,6 +305,26 @@
         <div class="hint">模型扫描根目录，可指向飞牛共享文件夹（M3 生效）</div>
       </div>
       <div class="form-row">
+        <label>变体下载源</label>
+        <select id="fDlSource">
+          <option value="github">GitHub 官方</option>
+          <option value="gitea">Gitea 镜像</option>
+        </select>
+        <div class="hint">加速变体 tar.gz 资产来源；内网环境选 Gitea 镜像更快</div>
+      </div>
+      <div class="form-row">
+        <label>镜像地址</label>
+        <input type="text" id="fMirror" placeholder="http://192.168.0.114:3000/T366/llama.cpp-fnos">
+        <div class="hint">Gitea 仓库 base（release 资产路径与 GitHub 同构）；仅下载源为 gitea 时生效</div>
+      </div>
+      <div class="form-row">
+        <label>市场默认源</label>
+        <select id="fMarket">
+          <option value="modelscope">ModelScope（国内直连）</option>
+          <option value="hf">HuggingFace 镜像</option>
+        </select>
+      </div>
+      <div class="form-row">
         <label>崩溃自动重启</label>
         <label style="display:flex;align-items:center;gap:6px;color:#1f2733">
           <input type="checkbox" id="fAutoRestart"> 启用
@@ -253,7 +344,7 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var state = { engine: null, settings: null, dirty: false };
-  var timers = { status: null, logs: null };
+  var timers = { status: null, logs: null, tasks: null };
 
   function toast(msg) {
     var t = $("toast");
@@ -512,6 +603,10 @@
     $("fApiKey").value = s.api_key || "";
     $("fModelsDir").value = s.models_dir || "";
     $("fAutoRestart").checked = !!s.auto_restart;
+    $("fDlSource").value = s.download_source || "github";
+    $("fMirror").value = s.mirror_base || "";
+    $("fMarket").value = s.market_source || "modelscope";
+    $("mSource").value = s.market_source || "modelscope";
     state.dirty = false;
   }
 
@@ -538,7 +633,10 @@
       ngl: parseInt($("fNgl").value, 10),
       api_key: $("fApiKey").value,
       models_dir: $("fModelsDir").value.trim(),
-      auto_restart: $("fAutoRestart").checked
+      auto_restart: $("fAutoRestart").checked,
+      download_source: $("fDlSource").value,
+      mirror_base: $("fMirror").value.trim(),
+      market_source: $("fMarket").value
     };
     if (isNaN(payload.inference_port) || isNaN(payload.ctx_size) ||
         isNaN(payload.threads) || isNaN(payload.ngl)) {
@@ -556,9 +654,284 @@
 
   // 输入即视为脏：提示需重启引擎的横幅仅在保存后出现一次，无需额外逻辑
 
+  // ---------- M4：硬件检测与加速变体 ----------
+  function fmtSize(bytes) {
+    if (bytes == null) { return "未知大小"; }
+    if (bytes >= 1073741824) { return (bytes / 1073741824).toFixed(2) + " GB"; }
+    if (bytes >= 1048576) { return (bytes / 1048576).toFixed(1) + " MB"; }
+    if (bytes >= 1024) { return (bytes / 1024).toFixed(1) + " KB"; }
+    return bytes + " B";
+  }
+  function fmtSpeed(bps) {
+    if (!bps) { return ""; }
+    return fmtSize(bps) + "/s";
+  }
+
+  function renderHardware(hw, installed, recommended) {
+    var g = $("hwGrid");
+    var gpu = hw && hw.gpu;
+    var gpuTxt = gpu
+      ? esc(gpu.name) + "（驱动 " + esc(gpu.driver) +
+        (gpu.memory_mib ? "，" + Math.round(gpu.memory_mib / 1024) + " GB 显存" : "") + "）"
+      : (hw && hw.vulkan ? "无 NVIDIA 独显（Vulkan 可用）" : "未检测到独立 GPU");
+    var installedTxt = (installed || []).join("、") || "无（仅内置 CPU 变体）";
+    g.innerHTML =
+      '<div class="k">架构</div><div class="v">' + esc(hw.arch) + '</div>' +
+      '<div class="k">GPU</div><div class="v">' + gpuTxt + '</div>' +
+      '<div class="k">推荐变体</div><div class="v">' + esc(recommended) +
+        '<span class="tag rec">推荐</span></div>' +
+      '<div class="k">已安装</div><div class="v">' + esc(installedTxt) + '</div>';
+  }
+
+  function renderVariantSelect(available, installed, recommended, current) {
+    var sel = $("fVariant");
+    sel.innerHTML = (available || []).map(function (v) {
+      var tags = [];
+      if (v === current) { tags.push("当前"); }
+      if ((installed || []).indexOf(v) >= 0) { tags.push("已装"); }
+      if (v === recommended) { tags.push("推荐"); }
+      return '<option value="' + v + '">' + v +
+        (tags.length ? "（" + tags.join(" · ") + "）" : "") + '</option>';
+    }).join("");
+    sel.value = current || recommended || (available || [])[0] || "";
+  }
+
+  function refreshVariants() {
+    return api("GET", "api/variants").then(function (d) {
+      if (!d.ok) { return; }
+      state.variants = d;
+      renderVariantSelect(d.available, d.installed, d.recommended, d.current);
+      renderHardware(state.hardware || { arch: "…" }, d.installed, d.recommended);
+    }).catch(function () {});
+  }
+
+  function refreshHardware() {
+    return api("GET", "api/hardware").then(function (d) {
+      if (!d.ok) { return; }
+      state.hardware = d.hardware;
+      if (state.variants) {
+        renderHardware(d.hardware, state.variants.installed, state.variants.recommended);
+      }
+    }).catch(function () {});
+  }
+
+  $("btnRedetect").addEventListener("click", function () {
+    api("POST", "api/hardware/redetect").then(function (d) {
+      if (!d.ok) { toast("检测失败：" + (d.error || "未知错误")); return; }
+      state.hardware = d.hardware;
+      toast(d.summary);
+      refreshVariants();
+      refreshStatus();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  });
+
+  function useVariant(name) {
+    var payload = {};
+    var s = state.settings || {};
+    for (var k in s) { payload[k] = s[k]; }
+    payload.variant = name;
+    api("PUT", "api/settings", payload).then(function (d) {
+      if (!d.ok) { toast("设置失败：" + (d.error || "未知错误")); return; }
+      fillSettings(d.settings);
+      toast("已启用变体 " + name + "；重启引擎后生效");
+      refreshVariants();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  }
+
+  $("btnUseVariant").addEventListener("click", function () {
+    var name = $("fVariant").value;
+    if (!name) { return; }
+    var v = state.variants;
+    if (!v || (v.installed || []).indexOf(name) < 0) {
+      toast("该变体尚未安装，请先点「安装选中变体」");
+      return;
+    }
+    useVariant(name);
+  });
+
+  $("btnInstallVariant").addEventListener("click", function () {
+    var name = $("fVariant").value;
+    if (!name) { return; }
+    $("variantErr").style.display = "none";
+    api("POST", "api/variants/install", { variant: name }).then(function (d) {
+      if (!d.ok) { toast("发起安装失败：" + (d.error || "未知错误")); return; }
+      toast(d.note || "开始安装 " + name);
+      startTaskPolling();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  });
+
+  function renderVariantTask(task) {
+    var box = $("variantTask");
+    if (!task) { box.innerHTML = ""; return; }
+    box.innerHTML = taskRowHtml(task);
+  }
+
+  // ---------- M4：模型市场 ----------
+  function renderRepoList(items) {
+    var box = $("marketList");
+    if (!items.length) {
+      box.innerHTML = '<div class="empty">没有匹配的仓库，换个关键词试试</div>';
+      return;
+    }
+    box.innerHTML = items.map(function (it) {
+      var meta = (it.gguf_hint ? "含 GGUF · " : "") +
+        "下载量 " + (it.downloads || 0) +
+        (it.stars ? " · 赞 " + it.stars : "") +
+        " · " + esc(it.repo);
+      return '<div class="repo-row" data-repo="' + esc(it.repo) + '" ' +
+        'data-source="' + esc(it.source) + '">' +
+        '<div class="m-name">' + esc(it.title) + '</div>' +
+        '<div class="m-meta">' + meta + '</div></div>';
+    }).join("");
+  }
+
+  function marketSearch() {
+    var q = $("mQuery").value.trim();
+    var source = $("mSource").value;
+    $("marketFiles").style.display = "none";
+    $("marketList").innerHTML = '<div class="empty">搜索中…</div>';
+    api("GET", "api/models/search?source=" + encodeURIComponent(source) +
+        "&q=" + encodeURIComponent(q) + "&limit=15").then(function (d) {
+      if (!d.ok) { $("marketList").innerHTML = ""; toast(d.error || "搜索失败"); return; }
+      renderRepoList(d.items || []);
+    }).catch(function (e) {
+      $("marketList").innerHTML = '<div class="empty">搜索失败：' + esc(e.message) + '</div>';
+    });
+  }
+
+  $("btnMarketSearch").addEventListener("click", marketSearch);
+  $("mQuery").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { marketSearch(); }
+  });
+
+  function showMarketFiles(repo, source) {
+    $("mfList").innerHTML = '<div class="empty">获取文件列表中…</div>';
+    $("marketFiles").style.display = "";
+    $("mfRepo").textContent = repo + " · GGUF 文件";
+    api("GET", "api/models/files?source=" + encodeURIComponent(source) +
+        "&repo=" + encodeURIComponent(repo)).then(function (d) {
+      if (!d.ok) { $("mfList").innerHTML = '<div class="empty">' + esc(d.error || "获取失败") + '</div>'; return; }
+      var files = d.files || [];
+      if (!files.length) {
+        $("mfList").innerHTML = '<div class="empty">该仓库未找到 .gguf 文件</div>';
+        return;
+      }
+      $("mfList").innerHTML = files.map(function (f) {
+        return '<div class="file-row">' +
+          '<div class="f-name">' + esc(f.file) +
+          (f.quant ? ' <span class="tag">' + esc(f.quant) + '</span>' : "") + '</div>' +
+          '<div class="f-size">' + fmtSize(f.size) + '</div>' +
+          '<button class="act small primary" data-dl="' + esc(f.file) + '">下载</button>' +
+          '</div>';
+      }).join("");
+    }).catch(function (e) {
+      $("mfList").innerHTML = '<div class="empty">获取失败：' + esc(e.message) + '</div>';
+    });
+  }
+
+  $("marketList").addEventListener("click", function (ev) {
+    var row = ev.target.closest ? ev.target.closest(".repo-row") : null;
+    if (row) { showMarketFiles(row.getAttribute("data-repo"), row.getAttribute("data-source")); }
+  });
+
+  $("mfList").addEventListener("click", function (ev) {
+    var f = ev.target.getAttribute && ev.target.getAttribute("data-dl");
+    if (!f) { return; }
+    var source = $("mSource").value;
+    var repo = $("mfRepo").textContent.split(" · ")[0];
+    api("POST", "api/models/download", {
+      source: source, repo: repo, file: f
+    }).then(function (d) {
+      if (!d.ok) { toast(d.error || "发起下载失败"); return; }
+      toast(d.note || "已开始下载：" + f.split("/").pop());
+      startTaskPolling();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  });
+
+  // ---------- M4：下载任务轮询 ----------
+  function taskRowHtml(t) {
+    var stateTxt = { queued: "排队中", running: "下载中", done: "完成",
+                     error: "失败", canceled: "已取消" }[t.state] || t.state;
+    var cls = { queued: "run", running: "run", done: "done", error: "error",
+                canceled: "canceled" }[t.state] || "";
+    var stage = t.stage ? esc(t.stage) + " · " : "";
+    var pct = (t.total && t.received != null && t.total > 0)
+      ? Math.round(t.received / t.total * 100) : null;
+    var meta = "";
+    if (t.state === "running" || t.state === "queued") {
+      meta = stage + fmtSize(t.received) + " / " + fmtSize(t.total) +
+        (t.speed ? " · " + fmtSpeed(t.speed) : "");
+    } else if (t.state === "error") {
+      meta = '<span class="tk-err">' + esc(t.error || "未知错误") + '</span>';
+    } else if (t.state === "done") {
+      meta = (t.result && t.result.version ? esc(t.result.version) : "已完成") +
+        (t.resumed ? " · 断点续传 " + fmtSize(t.resumed) : "");
+    }
+    var canCancel = (t.state === "queued" || t.state === "running");
+    return '<div class="taskrow">' +
+      '<div class="tk-head"><span class="tk-name">' +
+      (t.kind === "variant" ? "变体 " + esc(t.payload.variant || "") + " 安装"
+                            : esc((t.payload.file || "").split("/").pop())) +
+      '</span><span class="tk-state ' + cls + '">' + stateTxt +
+      (pct != null ? " " + pct + "%" : "") + '</span></div>' +
+      '<div class="track"><div class="fill" style="width:' +
+      (pct != null ? pct : (t.state === "done" ? 100 : 4)) + '%"></div></div>' +
+      '<div class="tk-meta"><span>' + meta + '</span>' +
+      (canCancel ? '<button class="act small danger" data-cancel="' + t.id + '">取消</button>' : "") +
+      '</div></div>';
+  }
+
+  function renderTasks(tasks) {
+    var box = $("taskList");
+    if (!tasks || !tasks.length) {
+      box.innerHTML = '<div class="empty">暂无任务</div>';
+      $("taskCount").textContent = "";
+      renderVariantTask(null);
+      return;
+    }
+    $("taskCount").textContent = "共 " + tasks.length + " 个";
+    box.innerHTML = tasks.map(taskRowHtml).join("");
+    renderVariantTask(tasks.filter(function (t) {
+      return t.kind === "variant" && t.state !== "done";
+    })[0] || null);
+  }
+
+  function pollTasks() {
+    return api("GET", "api/tasks").then(function (d) {
+      var tasks = d.tasks || [];
+      renderTasks(tasks);
+      var active = tasks.some(function (t) {
+        return t.state === "queued" || t.state === "running";
+      });
+      var doneNow = tasks.some(function (t) { return t.state === "done"; });
+      if (doneNow && !active) { refreshModels(); refreshVariants(); }
+      if (active) {
+        timers.tasks = setTimeout(pollTasks, 1500);
+      } else {
+        timers.tasks = null;
+      }
+    }).catch(function () { timers.tasks = null; });
+  }
+
+  function startTaskPolling() {
+    if (timers.tasks) { return; }
+    timers.tasks = setTimeout(pollTasks, 200);
+  }
+
+  $("taskList").addEventListener("click", function (ev) {
+    var id = ev.target.getAttribute && ev.target.getAttribute("data-cancel");
+    if (!id) { return; }
+    api("POST", "api/tasks/" + id + "/cancel").then(function () {
+      startTaskPolling();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  });
+
   // ---------- 启动 ----------
   refreshStatus();
   loadSettings();
+  refreshVariants();
+  refreshHardware();
+  startTaskPolling();
   timers.status = setInterval(refreshStatus, 2000);
 })();
 </script>

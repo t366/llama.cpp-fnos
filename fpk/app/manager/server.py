@@ -1,35 +1,48 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""llamacpp manager-server —— 飞牛 fnOS llama.cpp 应用管理后端（M2 引擎管理版）。
+"""llamacpp manager-server —— 飞牛 fnOS llama.cpp 应用管理后端（M4 下载版）。
 
 只监听 127.0.0.1；唯一外部入口是 fnOS nginx 的
 /cgi/ThirdParty/llamacpp/index.cgi/（走飞牛登录鉴权）。
 纯 Python 3 标准库实现，无第三方依赖。
 
 路由（JSON）：
-- GET  /api/status                  引擎运行态 + 服务信息
+- GET  /api/status                  引擎运行态 + 服务信息 + 硬件摘要
+- GET  /api/hardware                硬件检测（缓存）；POST redetect 重新检测
 - POST /api/engine/start|stop|restart
 - GET  /api/engine/logs?tail=N      环形缓冲尾部（默认 200，上限 2000）
-- GET  /api/settings                当前配置
-- PUT  /api/settings                修改配置（application/json）
+- GET  /api/variants                已装/可装变体 + 推荐项
+- POST /api/variants/install        按需下载安装变体（后台任务）
+- GET  /api/settings / PUT /api/settings
+- GET  /api/models                  本地扫描
+- GET  /api/models/search?q=&source=&limit=   模型市场搜索
+- GET  /api/models/files?source=&repo=        仓库内 GGUF 文件列表
+- POST /api/models/download         市场模型下载（后台任务）
+- GET  /api/tasks、/api/tasks/<id>  任务列表/进度轮询；POST /api/tasks/<id>/cancel
 被停止（TERM）或退出时自动终止 llama-server 子进程。
 """
 
 import argparse
 import atexit
 import json
+import os
 import signal
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import downloader
+import hardware
+import market
+import variants
 from engine import Engine
 from models import ModelError, delete_model, resolve_models_dir, scan as scan_models
 from settings import Settings
+from tasks import TaskRegistry
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.3.1"
-MILESTONE = "M3"
+APP_VERSION = "0.4.0"
+MILESTONE = "M4"
 
 # 限制
 BODY_MAX_BYTES = 1024 * 1024      # 请求体上限 1MB（设计 §4.6）
@@ -45,6 +58,9 @@ INTERNAL_ERROR = 500
 engine = None      # 在 main() 中初始化
 settings = None
 server = None      # HTTPServer 引用，供 SIGTERM 处理器调用 shutdown()
+tasks_reg = TaskRegistry()   # 后台下载任务表（变体安装 + 模型下载）
+_hw_cache = None              # 硬件检测结果缓存（None = 未检测）
+_hw_lock = threading.Lock()
 
 
 class ManagerServer(ThreadingHTTPServer):
@@ -109,6 +125,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "settings": settings.get()})
             elif path == "/api/models":
                 self.handle_models_list()
+            elif path == "/api/hardware":
+                self.handle_hardware()
+            elif path == "/api/variants":
+                self.handle_variants()
+            elif path == "/api/models/search":
+                self.handle_market_search(query)
+            elif path == "/api/models/files":
+                self.handle_market_files(query)
+            elif path == "/api/tasks":
+                self.send_json({"ok": True, "tasks": self._task_views()})
+            elif path.startswith("/api/tasks/"):
+                self.handle_task_get(path[len("/api/tasks/"):])
             else:
                 self.send_error_json(NOT_FOUND, "not found: %s" % path)
         except Exception as exc:  # 防御：任何路由内异常都回 JSON 而非断连
@@ -120,7 +148,14 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/api/engine/start", "/api/engine/stop", "/api/engine/restart"):
                 self.handle_engine_action(path.rsplit("/", 1)[1])
             elif path == "/api/hardware/redetect":
-                self.send_error_json(NOT_FOUND, "hardware detect 在 M4 提供")
+                self.handle_hardware_redetect()
+            elif path == "/api/variants/install":
+                self.handle_variant_install()
+            elif path == "/api/models/download":
+                self.handle_model_download()
+            elif path.startswith("/api/tasks/") and path.endswith("/cancel"):
+                self.handle_task_cancel(
+                    path[len("/api/tasks/"):-len("/cancel")])
             else:
                 self.send_error_json(NOT_FOUND, "not found: %s" % path)
         except Exception as exc:
@@ -167,6 +202,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- 处理器 ----------
     def handle_status(self):
+        hw = _hardware()
         self.send_json({
             "ok": True,
             "app": APP_NAME,
@@ -174,7 +210,183 @@ class Handler(BaseHTTPRequestHandler):
             "milestone": MILESTONE,
             "service": "manager",
             "engine": engine.status(),
+            "hardware_summary": hardware.summary_text(hw),
+            "recommended_variant": hw.get("recommended"),
         })
+
+    # ---------- 硬件检测 ----------
+    def handle_hardware(self):
+        hw = _hardware()
+        self.send_json({"ok": True, "hardware": hw,
+                        "summary": hardware.summary_text(hw)})
+
+    def handle_hardware_redetect(self):
+        global _hw_cache
+        with _hw_lock:
+            _hw_cache = hardware.detect()
+            hw = _hw_cache
+        engine.log_line("[manager] 重新硬件检测：%s"
+                        % hardware.summary_text(hw))
+        self.send_json({"ok": True, "hardware": hw,
+                        "summary": hardware.summary_text(hw)})
+
+    # ---------- 变体 ----------
+    def handle_variants(self):
+        cfg = settings.get()
+        hw = _hardware()
+        self.send_json({
+            "ok": True,
+            "installed": variants.installed(engine.app_dir, engine.data_dir),
+            "available": sorted(variants.VARIANTS.keys()),
+            "recommended": hw.get("recommended"),
+            "current": cfg.get("variant") or None,
+            "download_source": cfg.get("download_source"),
+            "mirror_base": cfg.get("mirror_base") or None,
+            "pinned_tag": variants.PINNED_TAG,
+        })
+
+    def handle_variant_install(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_error_json(BAD_REQUEST, err)
+            return
+        name = body.get("variant")
+        if not variants.exists(name):
+            self.send_error_json(BAD_REQUEST, "未知变体：%s" % name)
+            return
+        # 同变体安装任务去重
+        for t in tasks_reg.list("variant"):
+            if t["state"] in ("queued", "running") and \
+                    t["payload"].get("variant") == name:
+                self.send_json({"ok": True, "task": _task_view(t),
+                                "note": "该变体已在安装中"})
+                return
+        cfg = settings.get()
+        source = body.get("source") or cfg.get("download_source") or "github"
+        task = tasks_reg.create("variant", {"variant": name, "source": source})
+
+        def work(t):
+            def progress(received, total, stage):
+                tasks_reg.progress(t["id"], received or 0, total)
+                tasks_reg.update(t["id"], stage=stage)
+            ok, verr, ver = variants.install(
+                name, engine.app_dir, engine.data_dir, source,
+                cfg.get("mirror_base") or "", progress=progress,
+                cancel=lambda: tasks_reg.cancel_requested(t["id"]))
+            if not ok:
+                raise RuntimeError(verr)
+            return {"version": ver, "dir": os.path.join(
+                engine.data_dir, "bin", name)}
+
+        tasks_reg.run(task, work)
+        engine.log_line("[manager] 开始安装变体 %s（源 %s）" % (name, source))
+        self.send_json({"ok": True, "task": _task_view(task)})
+
+    # ---------- 模型市场 ----------
+    def handle_market_search(self, query):
+        q = (query.get("q", [""])[0] or "").strip()
+        source = query.get("source", [settings.value("market_source")])[0]
+        try:
+            limit = int(query.get("limit", [market.DEFAULT_LIMIT])[0])
+        except ValueError:
+            limit = market.DEFAULT_LIMIT
+        try:
+            items = market.search(source, q, limit)
+        except market.MarketError as exc:
+            self.send_error_json(BAD_REQUEST, str(exc))
+            return
+        self.send_json({"ok": True, "source": source,
+                        "count": len(items), "items": items})
+
+    def handle_market_files(self, query):
+        source = query.get("source", [settings.value("market_source")])[0]
+        repo = (query.get("repo", [""])[0] or "").strip()
+        try:
+            files = market.list_files(source, repo)
+        except market.MarketError as exc:
+            self.send_error_json(BAD_REQUEST, str(exc))
+            return
+        self.send_json({"ok": True, "source": source, "repo": repo,
+                        "count": len(files), "files": files})
+
+    def handle_model_download(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_error_json(BAD_REQUEST, err)
+            return
+        source = body.get("source") or settings.value("market_source")
+        repo = (body.get("repo") or "").strip()
+        path = (body.get("file") or "").strip()
+        try:
+            url = market.download_url(source, repo, path)
+        except market.MarketError as exc:
+            self.send_error_json(BAD_REQUEST, str(exc))
+            return
+        root = self._models_root()
+        try:
+            os.makedirs(root, exist_ok=True)
+        except OSError as exc:
+            self.send_error_json(BAD_REQUEST, "模型目录不可创建：%s" % exc)
+            return
+        filename = path.rsplit("/", 1)[-1]
+        dest = os.path.join(root, filename)
+        # 目标已存在（或别处同名任务在跑）时拒绝重复下载
+        if os.path.isfile(dest):
+            self.send_error_json(BAD_REQUEST, "文件已存在：%s（可先删除再下载）" % filename)
+            return
+        for t in tasks_reg.list("model"):
+            if t["state"] in ("queued", "running") and \
+                    t["payload"].get("file") == path and \
+                    t["payload"].get("repo") == repo:
+                self.send_json({"ok": True, "task": _task_view(t),
+                                "note": "该文件已在下载中"})
+                return
+        task = tasks_reg.create("model", {
+            "source": source, "repo": repo, "file": path, "dest": dest})
+
+        def work(t):
+            # 断点续传：既有 .part 大小立即写入任务，轮询端即刻可见
+            part = dest + ".part"
+            if os.path.isfile(part):
+                tasks_reg.update(t["id"], resumed=os.path.getsize(part))
+
+            def progress(received, total):
+                tasks_reg.progress(t["id"], received, total)
+            final, resumed = downloader.download(
+                url, dest, extra_host_suffixes=downloader.DEFAULT_HOST_SUFFIXES,
+                progress=progress,
+                cancel=lambda: tasks_reg.cancel_requested(t["id"]))
+            engine.log_line("[manager] 模型下载完成：%s（续传 %d 字节）"
+                            % (filename, resumed))
+            return {"dest": final, "resumed": resumed}
+
+        tasks_reg.run(task, work)
+        engine.log_line("[manager] 开始下载模型 %s/%s（%s）"
+                        % (repo, path, source))
+        self.send_json({"ok": True, "task": _task_view(task)})
+
+    # ---------- 任务 ----------
+    def handle_task_get(self, task_id):
+        task = tasks_reg.get(task_id)
+        if not task:
+            self.send_error_json(NOT_FOUND, "任务不存在：%s" % task_id)
+            return
+        self.send_json({"ok": True, "task": _task_view(task)})
+
+    def handle_task_cancel(self, task_id):
+        task = tasks_reg.get(task_id)
+        if not task:
+            self.send_error_json(NOT_FOUND, "任务不存在：%s" % task_id)
+            return
+        if task["state"] in ("done", "error", "canceled"):
+            self.send_json({"ok": True, "task": _task_view(task),
+                            "note": "任务已结束"})
+            return
+        tasks_reg.cancel(task_id)
+        self.send_json({"ok": True, "task": tasks_reg.get(task_id)})
+
+    def _task_views(self):
+        return [_task_view(t) for t in tasks_reg.list()]
 
     def handle_engine_action(self, action):
         if action == "start":
@@ -207,6 +419,20 @@ class Handler(BaseHTTPRequestHandler):
                         "count": len(found), "models": found})
 
 
+def _hardware():
+    """硬件检测结果（进程内缓存，POST /api/hardware/redetect 可刷新）。"""
+    global _hw_cache
+    with _hw_lock:
+        if _hw_cache is None:
+            _hw_cache = hardware.detect()
+        return _hw_cache
+
+
+def _task_view(task):
+    """任务字典 → 前端视图：剔除 _ 开头的内部字段。"""
+    return {k: v for k, v in task.items() if not k.startswith("_")}
+
+
 def _terminate_engine_and_exit():
     if engine is not None:
         engine.shutdown_cleanup()
@@ -231,8 +457,9 @@ def main():
     atexit.register(_terminate_engine_and_exit)
 
     server = ManagerServer((args.host, args.port), Handler)
-    print("[%s] manager %s (M3) listening on %s:%d, app=%s, data=%s"
-          % (APP_NAME, APP_VERSION, args.host, args.port, args.app_dir, args.data_dir),
+    print("[%s] manager %s (%s) listening on %s:%d, app=%s, data=%s"
+          % (APP_NAME, APP_VERSION, MILESTONE, args.host, args.port,
+             args.app_dir, args.data_dir),
           flush=True)
     try:
         server.serve_forever()

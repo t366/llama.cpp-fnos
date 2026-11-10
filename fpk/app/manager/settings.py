@@ -20,9 +20,12 @@ DEFAULTS = {
     "ngl": 0,                 # GPU offload 层数（--n-gpu-layers；CPU 变体保持 0）
     "api_key": "",            # 为空则不启用鉴权（llama-server --api-key）
     "model": "",              # 当前 GGUF 模型绝对路径
-    "variant": "",            # 引擎变体目录名；空 = 自动（M2 仅内置 CPU）
+    "variant": "",            # 引擎变体目录名；空 = 自动（硬件检测推荐）
     "auto_restart": True,     # 崩溃自动重启
     "models_dir": "",         # 模型扫描目录；空 = 数据目录下 models/
+    "download_source": "github",   # 变体资产源：github | gitea（镜像）
+    "mirror_base": "",        # Gitea 镜像 base（如 http://192.168.0.114:3000/T366/llama.cpp-fnos）
+    "market_source": "modelscope",  # 模型市场默认源：modelscope | hf
 }
 
 # 允许写入的字段与类型
@@ -30,6 +33,7 @@ _TYPES = {
     "inference_port": int, "bind": str, "ctx_size": int, "threads": int,
     "ngl": int, "api_key": str, "model": str, "variant": str,
     "auto_restart": bool, "models_dir": str,
+    "download_source": str, "mirror_base": str, "market_source": str,
 }
 
 # 整数型字段取值范围
@@ -92,6 +96,13 @@ class Settings:
                 return False, "%s 需在 %d~%d 之间" % (key, lo, hi)
         if "bind" in clean and clean["bind"] not in _BIND_CHOICES:
             return False, "bind 仅支持 0.0.0.0 或 127.0.0.1"
+        if "download_source" in clean and clean["download_source"] not in ("github", "gitea"):
+            return False, "download_source 仅支持 github 或 gitea"
+        if "market_source" in clean and clean["market_source"] not in ("modelscope", "hf"):
+            return False, "market_source 仅支持 modelscope 或 hf"
+        if "mirror_base" in clean and clean["mirror_base"]:
+            if not clean["mirror_base"].lower().startswith(("http://", "https://")):
+                return False, "mirror_base 需以 http:// 或 https:// 开头"
         with self._lock:
             self._data.update(clean)
             self._save_locked()
