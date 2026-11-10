@@ -1,5 +1,5 @@
 appname               = llamacpp
-version               = 0.4.2
+version               = 0.4.3
 display_name          = llama.cpp
 desc                  = 本地大模型推理服务：llama.cpp 原生二进制运行（无 Docker），提供 OpenAI 兼容 API、聊天界面与模型管理，支持 NVIDIA GPU 自动加速。
 platform              = x86
@@ -14,4 +14,4 @@ desktop_applaunchname = llamacpp.Application
 service_port          = 18080
 checkport             = false
 ctl_stop              = true
-changelog             = 模型市场对标 LM Studio 详情页：双栏布局（左侧推荐/搜索列表，右侧详情面板），含统计元数据（下载/赞/更新时间/许可证）、能力标签、下载选项与 README 展示；进入市场自动加载推荐列表。
+changelog             = 模型详情 README 升级为 Markdown 富文本渲染（内嵌 marked + DOMPurify，离线可用），图片/链接相对路径自动改写为源站直连，HTML 注入消毒，与 LM Studio 详情页观感一致。

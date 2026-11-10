@@ -142,12 +142,38 @@
   .cap.chat, .cap.textgen { background: #e8f7ee; color: #1c7c46; }
   .cap.embedding, .cap.speech { background: #fdf0f2; color: #b4396b; }
   .d-sec { font-size: 13px; font-weight: 600; color: #333c49; margin: 16px 0 8px; }
-  pre.readme {
-    background: #f7f8fb; color: #3a4553; border: 1px solid #eef0f4; border-radius: 10px;
-    padding: 12px 14px; font-size: 12px; line-height: 1.6; max-height: 380px; overflow: auto;
-    white-space: pre-wrap; word-break: break-all; font-family: Consolas, Menlo, monospace;
-    margin: 0;
+  /* README Markdown 渲染体（marked + DOMPurify） */
+  .md-body {
+    background: #fff; color: #3a4553; border: 1px solid #eef0f4; border-radius: 10px;
+    padding: 14px 18px; font-size: 13px; line-height: 1.65; max-height: 420px; overflow: auto;
+    word-break: break-word; margin: 0;
   }
+  .md-body h1, .md-body h2 { font-size: 16px; margin: 16px 0 10px; padding-bottom: 6px;
+                             border-bottom: 1px solid #eef0f4; }
+  .md-body h3 { font-size: 14.5px; margin: 14px 0 8px; }
+  .md-body h4, .md-body h5, .md-body h6 { font-size: 13.5px; margin: 12px 0 6px; }
+  .md-body h1:first-child, .md-body h2:first-child, .md-body h3:first-child { margin-top: 0; }
+  .md-body p { margin: 8px 0; }
+  .md-body ul, .md-body ol { margin: 8px 0; padding-left: 22px; }
+  .md-body li { margin: 3px 0; }
+  .md-body a { color: #2f6fed; text-decoration: none; }
+  .md-body a:hover { text-decoration: underline; }
+  .md-body img { max-width: 100%; height: auto; border-radius: 6px; }
+  .md-body code {
+    background: #f2f4f8; border-radius: 4px; padding: 1px 5px;
+    font-family: Consolas, Menlo, monospace; font-size: 12px;
+  }
+  .md-body pre {
+    background: #10141b; color: #c7d0dc; border-radius: 8px; padding: 10px 12px;
+    overflow: auto; font-size: 12px; line-height: 1.55; margin: 8px 0;
+    font-family: Consolas, Menlo, monospace;
+  }
+  .md-body pre code { background: transparent; padding: 0; color: inherit; }
+  .md-body table { border-collapse: collapse; margin: 8px 0; max-width: 100%; display: block; overflow-x: auto; }
+  .md-body th, .md-body td { border: 1px solid #dde3ec; padding: 5px 10px; font-size: 12.5px; }
+  .md-body th { background: #f7f8fb; }
+  .md-body blockquote { border-left: 3px solid #d5dae2; margin: 8px 0; padding: 2px 12px; color: #6b7686; }
+  .md-body hr { border: 0; border-top: 1px solid #eef0f4; margin: 14px 0; }
   @media (max-width: 640px) {
     .market-layout { flex-direction: column; }
     .market-left { flex: none; width: 100%; }
@@ -381,6 +407,9 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<!-- README Markdown 渲染（本地内嵌，离线可用）：marked MIT / DOMPurify Apache-2.0 -->
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -912,6 +941,41 @@
       '</div>';
   }
 
+  function mdRender(text, repo, source) {
+    // Markdown → 消毒 HTML → 相对资源路径改写为市场源直连 URL
+    var box = document.createElement("div");
+    box.className = "md-body";
+    try {
+      box.innerHTML = DOMPurify.sanitize(marked.parse(text));
+    } catch (e) {
+      box.textContent = text;  // 渲染库异常时退回纯文本
+      return box.outerHTML;
+    }
+    // 相对路径改写：hf 用镜像 resolve 端点；ms 用文件下载端点（302 → CDN）
+    var rel = function (u) {
+      if (!u || /^(https?:|data:|#|\/\/)/i.test(u)) { return u; }
+      u = u.replace(/^\.?\//, "");
+      if (source === "hf") {
+        return "https://hf-mirror.com/" + repo + "/resolve/main/" + u;
+      }
+      return "https://www.modelscope.cn/api/v1/models/" + repo +
+        "/repo?Revision=master&FilePath=" + u;
+    };
+    var imgs = box.querySelectorAll("img");
+    for (var i = 0; i < imgs.length; i++) {
+      imgs[i].src = rel(imgs[i].getAttribute("src"));
+      imgs[i].loading = "lazy";
+      imgs[i].referrerPolicy = "no-referrer";
+    }
+    var links = box.querySelectorAll("a");
+    for (var j = 0; j < links.length; j++) {
+      links[j].href = rel(links[j].getAttribute("href") || "#");
+      links[j].target = "_blank";
+      links[j].rel = "noopener noreferrer";
+    }
+    return box.outerHTML;
+  }
+
   function renderRepoDetail(d) {
     var caps = (d.capabilities || []).map(function (c) {
       return '<span class="cap ' + esc(c.key) + '">' + esc(c.label) + '</span>';
@@ -930,7 +994,7 @@
       ? files.map(fileRowHtml).join("")
       : '<div class="empty">该仓库未找到 .gguf 文件</div>';
     var readme = d.readme
-      ? '<pre class="readme">' + esc(d.readme) + '</pre>'
+      ? mdRender(d.readme, d.repo, d.source)
       : '<div class="empty">无 README</div>';
     $("repoDetail").innerHTML =
       '<div class="d-head"><div class="m-name">' + esc(d.title) + '</div>' +
