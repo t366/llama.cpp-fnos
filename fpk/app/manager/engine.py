@@ -31,6 +31,7 @@ LOG_FILE_MAX = 5 * 1024 * 1024  # 落盘日志超过 5MB 时轮转
 START_TIMEOUT = 90            # 等待 /health 就绪秒数（模型加载可能很慢）
 POLL_INTERVAL = 1.0           # /health 轮询间隔（CGI 轮询约束 ≥1s）
 CRASH_BACKOFF = (2, 5, 10, 30, 60)  # 连续崩溃重启的退避序列（秒）
+MAX_CRASH_RESTARTS = 5        # 连续崩溃自动重启上限（确定性错误不应无限循环）
 
 
 class Engine:
@@ -66,12 +67,34 @@ class Engine:
                 return d
         return None
 
+    # ---------- 模型路径解析 ----------
+    def _resolve_model(self, path):
+        """允许填 GGUF 文件路径，或仅含一个 GGUF 的目录（自动选用）。
+        返回 (resolved_path, error)；多文件时列出候选由用户指定。"""
+        if not path:
+            return None, "未配置模型路径，请先在设置页填写 GGUF 路径"
+        if os.path.isfile(path):
+            return path, None
+        if os.path.isdir(path):
+            try:
+                names = sorted(f for f in os.listdir(path)
+                               if f.lower().endswith(".gguf"))
+            except OSError as exc:
+                return None, "模型目录不可读：%s（%s）" % (path, exc)
+            if not names:
+                return None, "模型目录中未找到 .gguf 文件：%s" % path
+            if len(names) > 1:
+                return None, ("模型目录含 %d 个 GGUF，请指定具体文件：%s"
+                              % (len(names), "、".join(names[:8])))
+            return os.path.join(path, names[0]), None
+        return None, "模型路径不存在：%s" % path
+
     # ---------- 启动 ----------
-    def _build_cmd(self, cfg, vdir):
+    def _build_cmd(self, cfg, vdir, model):
         cmd = [os.path.join(vdir, "llama-server"),
                "--host", cfg["bind"], "--port", str(cfg["inference_port"])]
-        if cfg.get("model"):
-            cmd += ["-m", cfg["model"]]
+        if model:
+            cmd += ["-m", model]
         cmd += ["--ctx-size", str(cfg["ctx_size"])]
         if cfg.get("threads"):
             cmd += ["--threads", str(cfg["threads"])]
@@ -81,9 +104,12 @@ class Engine:
             cmd += ["--api-key", cfg["api_key"]]
         return cmd
 
-    def start(self):
-        """返回 (ok, error)。失败不改变既有状态。"""
+    def start(self, reset_crashes=True):
+        """返回 (ok, error)。失败不改变既有状态。
+        reset_crashes=False 用于守护线程的自动重启（保持连续崩溃计数）。"""
         with self._lock:
+            if reset_crashes:
+                self._crash_count = 0
             if self._state in (STARTING, RUNNING, STOPPING):
                 return False, "引擎当前为 %s，无需重复启动" % self._state
             cfg = self.settings.get()
@@ -91,8 +117,11 @@ class Engine:
             if not vdir:
                 return False, "未找到变体 %s 的二进制（llama-server 不存在）" % (
                     cfg.get("variant") or self.default_variant())
-            if not cfg.get("model"):
-                return False, "未配置模型路径，请先在设置页填写 GGUF 路径"
+            model, merr = self._resolve_model(cfg.get("model"))
+            if merr:
+                return False, merr
+            if model != cfg.get("model"):
+                self.log_line("[manager] 模型解析：%s -> %s" % (cfg.get("model"), model))
             self._log_rotate_if_needed()
             self._manual_stop = False
             self._exit_code = None
@@ -105,7 +134,7 @@ class Engine:
                 ":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
             try:
                 proc = subprocess.Popen(
-                    self._build_cmd(cfg, vdir),
+                    self._build_cmd(cfg, vdir, model),
                     cwd=vdir, env=env,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -120,7 +149,7 @@ class Engine:
             self._logs.clear()
             self.log_line("[manager] 启动 llama-server（变体 %s，pid %d）"
                           % (os.path.basename(vdir), proc.pid))
-            self.log_line("[manager] 参数：%s" % " ".join(self._build_cmd(cfg, vdir)))
+            self.log_line("[manager] 参数：%s" % " ".join(self._build_cmd(cfg, vdir, model)))
         # 输出泵 / 就绪探测 / 崩溃守护各一线程，均随主进程退出而消亡
         threading.Thread(target=self._pump_output, args=(proc, gen),
                          daemon=True).start()
@@ -245,13 +274,21 @@ class Engine:
                 self._state = ERROR
                 self._started_at = 0.0
             return
+        if self._crash_count >= MAX_CRASH_RESTARTS:
+            # 连续崩溃达到上限：多半是确定性配置错误（模型路径/参数非法），停止循环
+            with self._lock:
+                self._state = ERROR
+                self._started_at = 0.0
+            self.log_line("[manager] 已连续崩溃 %d 次，停止自动重启；"
+                          "请检查模型路径与参数后手动启动" % self._crash_count)
+            return
         # 退避重启（连续崩溃计数限制在退避序列长度内）
         delay = CRASH_BACKOFF[min(self._crash_count, len(CRASH_BACKOFF) - 1)]
         self._crash_count += 1
         self.log_line("[manager] %ds 后自动重启（第 %d 次崩溃）" % (delay, self._crash_count))
         self._state_stash_for_backoff()
         time.sleep(delay)
-        ok, err = self.start()
+        ok, err = self.start(reset_crashes=False)
         if not ok:
             with self._lock:
                 self._state = ERROR

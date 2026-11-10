@@ -1,5 +1,5 @@
 appname               = llamacpp
-version               = 0.2.0
+version               = 0.2.1
 display_name          = llama.cpp
 desc                  = 本地大模型推理服务：llama.cpp 原生二进制运行（无 Docker），提供 OpenAI 兼容 API、聊天界面与模型管理，支持 NVIDIA GPU 自动加速。
 platform              = x86
@@ -14,4 +14,4 @@ desktop_applaunchname = llamacpp.Application
 service_port          = 18080
 checkport             = false
 ctl_stop              = true
-changelog             = M2 引擎管理版本：llama-server 启动/停止/重启、崩溃自动重启、运行日志查看与参数设置（端口/上下文/线程/GPU 层/API Key）。
+changelog             = M2 引擎管理：起停/重启、崩溃自动重启、日志与参数设置；模型路径支持目录（唯一 GGUF 自动选用）；连续崩溃 5 次后停止自动重启。

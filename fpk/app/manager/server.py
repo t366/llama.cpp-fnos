@@ -27,7 +27,7 @@ from engine import Engine
 from settings import Settings
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 MILESTONE = "M2"
 
 # 限制
