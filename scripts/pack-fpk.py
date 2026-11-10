@@ -83,14 +83,23 @@ def _add(tar, arcname, path):
             tar.addfile(ti, fh)
 
 
-def make_app_tgz(root, out_path):
+def make_app_tgz(root, out_path, platform=None):
     """fpk/app/ 内容 → app.tgz。成员不带 app/ 前缀（以 app/ 为根，fnOS
-    安装器直接解包到应用目录）；排除 __pycache__ 与 *.pyc 编译产物。"""
+    安装器直接解包到应用目录）；排除 __pycache__ 与 *.pyc 编译产物。
+
+    platform（manifest 的 x86/arm）非空时，bin/ 下他架构二进制目录一并剔除：
+    fpk 是单架构包，vendor 后 app/bin/ 可能同时存在 cpu-x86_64 与 cpu-aarch64。
+    """
     app_dir = os.path.join(root, "app")
+    # manifest platform → 打包时剔除的 bin 子目录后缀
+    skip_suffix = {"x86": "-aarch64", "arm": "-x86_64"}.get(platform)
     with tarfile.open(out_path, "w:gz") as tar:
         def walk(dir_path, prefix):
             for name in sorted(os.listdir(dir_path)):
                 if name == "__pycache__" or name.endswith(".pyc"):
+                    continue
+                if skip_suffix and prefix == "bin/" and name.endswith(skip_suffix):
+                    print("  剔除他架构二进制目录: bin/%s" % name)
                     continue
                 full = os.path.join(dir_path, name)
                 _add(tar, prefix + name, full)
@@ -123,7 +132,7 @@ def main():
     args = ap.parse_args()
     mf = check_structure(args.dir)
     app_tgz = args.out + ".tmp.app.tgz"
-    make_app_tgz(args.dir, app_tgz)
+    make_app_tgz(args.dir, app_tgz, platform=mf.get("platform"))
     try:
         make_fpk(args.dir, args.out, app_tgz)
     finally:

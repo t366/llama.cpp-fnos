@@ -4,8 +4,11 @@
 
 用法（开发机，任意平台）：
   python scripts/vendor-binaries.py                          # x86_64（tag 钉死 b12229）
-  python scripts/vendor-binaries.py --arch arm64             # arm64（M5）
+  python scripts/vendor-binaries.py --arch aarch64           # ARM（M5）
   python scripts/vendor-binaries.py --base https://ghfast.top/https://github.com  # 走镜像
+
+目录名与运行时变体名（manager variants.py / engine.py）保持一致：
+cpu-x86_64 / cpu-aarch64。
 
 符号链接平替：nightly 包内 lib*.so / lib*.so.0 为符号链接，Windows 上无法保留；
 本脚本将链接目标实体复制一份并命名为链接名（Linux 动态加载器按文件名查找，行为等价）。
@@ -58,13 +61,13 @@ def extract_members(tf, wanted):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arch", default="x86_64", choices=["x86_64", "arm64"])
+    ap.add_argument("--arch", default="x86_64", choices=["x86_64", "aarch64"])
     ap.add_argument("--tag", default=DEFAULT_TAG)
     ap.add_argument("--base", default="https://github.com")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent.parent
-    os_part = {"x86_64": "x64", "arm64": "arm64"}[args.arch]
+    os_part = {"x86_64": "x64", "aarch64": "arm64"}[args.arch]
     fname = f"llama-{args.tag}-bin-ubuntu-{os_part}.tar.gz"
     url = f"{args.base}/ggml-org/llama.cpp/releases/download/{args.tag}/{fname}"
 
