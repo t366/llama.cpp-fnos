@@ -108,6 +108,8 @@
          background: #eef4fd; color: #2757b4; margin-left: 6px; }
   .tag.ok { background: #e8f7ee; color: #1c7c46; }
   .tag.rec { background: #fff7e6; color: #9a6b00; }
+  .tag.warn { background: #fff7ee; color: #9a6b00; }
+  .tag.bad { background: #fdeeee; color: #b4332f; }
   .market-bar { display: flex; gap: 8px; }
   .market-bar select, .market-bar input[type=text] {
     flex: 0 0 auto; padding: 8px 10px; border: 1px solid #d5dae2; border-radius: 8px;
@@ -675,8 +677,11 @@
         (gpu.memory_mib ? "，" + Math.round(gpu.memory_mib / 1024) + " GB 显存" : "") + "）"
       : (hw && hw.vulkan ? "无 NVIDIA 独显（Vulkan 可用）" : "未检测到独立 GPU");
     var installedTxt = (installed || []).join("、") || "无（仅内置 CPU 变体）";
+    var memTxt = hw && hw.mem_total_mib
+      ? Math.round(hw.mem_total_mib / 1024) + " GB（模型适配提示用）" : "未知";
     g.innerHTML =
       '<div class="k">架构</div><div class="v">' + esc(hw.arch) + '</div>' +
+      '<div class="k">系统内存</div><div class="v">' + memTxt + '</div>' +
       '<div class="k">GPU</div><div class="v">' + gpuTxt + '</div>' +
       '<div class="k">推荐变体</div><div class="v">' + esc(recommended) +
         '<span class="tag rec">推荐</span></div>' +
@@ -774,13 +779,15 @@
       return;
     }
     box.innerHTML = items.map(function (it) {
-      var meta = (it.gguf_hint ? "含 GGUF · " : "") +
-        "下载量 " + (it.downloads || 0) +
+      var pt = it.params
+        ? ' <span class="tag">' + esc(it.params) + '</span>' : "";
+      var gt = it.gguf_hint ? ' <span class="tag ok">GGUF</span>' : "";
+      var meta = "下载量 " + (it.downloads || 0) +
         (it.stars ? " · 赞 " + it.stars : "") +
         " · " + esc(it.repo);
       return '<div class="repo-row" data-repo="' + esc(it.repo) + '" ' +
         'data-source="' + esc(it.source) + '">' +
-        '<div class="m-name">' + esc(it.title) + '</div>' +
+        '<div class="m-name">' + esc(it.title) + pt + gt + '</div>' +
         '<div class="m-meta">' + meta + '</div></div>';
     }).join("");
   }
@@ -804,7 +811,26 @@
     if (ev.key === "Enter") { marketSearch(); }
   });
 
+  // LM Studio 式内存适配预估：模型文件 + 1.5GiB 运行余量，
+  // 对比可用内存（推荐 CUDA/Vulkan 变体时叠加显存）。无硬件数据则不显示。
+  function ramTag(sizeBytes) {
+    if (!sizeBytes) { return null; }
+    var hw = state.hardware || {};
+    var mem = hw.mem_total_mib;
+    if (!mem) { return null; }
+    var rec = hw.recommended || "";
+    var gpuMib = (hw.gpu && hw.gpu.memory_mib) ? hw.gpu.memory_mib : 0;
+    var avail = mem + ((rec.indexOf("cuda-") === 0 || rec.indexOf("vulkan-") === 0) ? gpuMib : 0);
+    var required = sizeBytes / 1048576 + 1536;
+    var pct = required / avail;
+    if (pct < 0.8) { return { cls: "ok", txt: "可运行" }; }
+    if (pct <= 1.0) { return { cls: "warn", txt: "勉强" }; }
+    return { cls: "bad", txt: "内存不足" };
+  }
+
   function showMarketFiles(repo, source) {
+    $("marketFiles").setAttribute("data-repo", repo);
+    $("marketFiles").setAttribute("data-source", source);
     $("mfList").innerHTML = '<div class="empty">获取文件列表中…</div>';
     $("marketFiles").style.display = "";
     $("mfRepo").textContent = repo + " · GGUF 文件";
@@ -817,9 +843,11 @@
         return;
       }
       $("mfList").innerHTML = files.map(function (f) {
+        var rt = ramTag(f.size);
         return '<div class="file-row">' +
           '<div class="f-name">' + esc(f.file) +
-          (f.quant ? ' <span class="tag">' + esc(f.quant) + '</span>' : "") + '</div>' +
+          (f.quant ? ' <span class="tag">' + esc(f.quant) + '</span>' : "") +
+          (rt ? ' <span class="tag ' + rt.cls + '">' + rt.txt + '</span>' : "") + '</div>' +
           '<div class="f-size">' + fmtSize(f.size) + '</div>' +
           '<button class="act small primary" data-dl="' + esc(f.file) + '">下载</button>' +
           '</div>';
@@ -837,8 +865,9 @@
   $("mfList").addEventListener("click", function (ev) {
     var f = ev.target.getAttribute && ev.target.getAttribute("data-dl");
     if (!f) { return; }
-    var source = $("mSource").value;
-    var repo = $("mfRepo").textContent.split(" · ")[0];
+    var box = $("marketFiles");
+    var source = box.getAttribute("data-source") || $("mSource").value;
+    var repo = box.getAttribute("data-repo");
     api("POST", "api/models/download", {
       source: source, repo: repo, file: f
     }).then(function (d) {

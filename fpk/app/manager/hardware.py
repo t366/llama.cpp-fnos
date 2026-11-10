@@ -10,6 +10,7 @@
 推荐顺序：cuda-13.5 > cuda-12.8 > vulkan > cpu（ARM 不做 CUDA，见设计 §4.3）。
 """
 
+import ctypes
 import glob
 import os
 import platform
@@ -81,6 +82,38 @@ def _detect_vulkan():
     return shutil.which("vulkaninfo") is not None
 
 
+def _detect_memory():
+    """系统总内存 MiB：Linux 读 /proc/meminfo，Windows 用 ctypes 兜底。失败返回 None。"""
+    try:
+        with open("/proc/meminfo", "r") as fh:
+            for line in fh:
+                if line.startswith("MemTotal:"):
+                    m = re.match(r"MemTotal:\s+(\d+)\s*kB", line)
+                    if m:
+                        return int(m.group(1)) // 1024
+    except OSError:
+        pass
+    if os.name == "nt":
+        try:
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            st = MEMORYSTATUSEX()
+            st.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return int(st.ullTotalPhys) // (1024 * 1024)
+        except Exception:
+            pass
+    return None
+
+
 def cuda_variant_for(gpu, machine):
     """按驱动主版本给出可用 CUDA 变体名；不满足/非 x86 返回 None。"""
     if gpu is None or machine not in CUDA_VARIANTS:
@@ -96,6 +129,7 @@ def detect():
     machine = arch()
     gpu = _detect_nvidia()
     vulkan = _detect_vulkan()
+    mem_total_mib = _detect_memory()
 
     variants_available = ["cpu-%s" % machine]
     if vulkan:
@@ -109,6 +143,7 @@ def detect():
         "arch": machine,
         "gpu": gpu,
         "vulkan": vulkan,
+        "mem_total_mib": mem_total_mib,
         "cuda_recommended": cuda_v,
         "variants_available": variants_available,
         "recommended": recommended,
@@ -117,10 +152,16 @@ def detect():
 
 def summary_text(info):
     """一行人类可读摘要，用于状态页与日志。"""
+    parts = []
+    if info.get("mem_total_mib"):
+        parts.append("内存 %d GiB" % round(info["mem_total_mib"] / 1024))
     if info.get("gpu"):
         g = info["gpu"]
-        mem = ("%d MiB" % g["memory_mib"]) if g.get("memory_mib") else "未知显存"
-        return "NVIDIA %s（驱动 %s，%s）" % (g["name"], g["driver"], mem)
+        mem = ("%d MiB 显存" % g["memory_mib"]) if g.get("memory_mib") else "未知显存"
+        parts.append("NVIDIA %s（驱动 %s，%s）" % (g["name"], g["driver"], mem))
+        return "；".join(parts)
     if info.get("vulkan"):
-        return "无 NVIDIA 独显，检测到 Vulkan 支持"
-    return "未检测到 GPU，使用 CPU 变体"
+        parts.append("无 NVIDIA 独显，检测到 Vulkan 支持")
+        return "；".join(parts)
+    parts.append("未检测到 GPU，使用 CPU 变体")
+    return "；".join(parts)

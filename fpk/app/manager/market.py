@@ -34,6 +34,20 @@ GGUF_RE = re.compile(r"\.gguf$", re.IGNORECASE)
 QUANT_RE = re.compile(
     r"-(I?Q\d_[A-Z0-9_]+|F(?:16|32)|BF16|FP16|FP32|MLX)_?",
     re.IGNORECASE)
+# 从名称提取参数规模（0.6B / 7B / 8x7B / 72B…），供 LM Studio 式卡片展示
+PARAM_RE = re.compile(
+    r"(\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?)?)B(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def _params_of(text):
+    """提取参数规模标签（如 0.6B / 7B / 8x7B）；无匹配返回 None。"""
+    m = PARAM_RE.search(text or "")
+    if not m:
+        return None
+    val = m.group(1).upper()
+    if "X" in val:
+        return val.replace("X", "x") + "B"
+    return val + "B"
 
 
 class MarketError(Exception):
@@ -78,6 +92,7 @@ def _ms_search(q, limit):
             "title": it.get("ChineseName") or name,
             "downloads": it.get("Downloads") or 0,
             "stars": it.get("Stars") or 0,
+            "params": _params_of(name) or _params_of(path),
             "gguf_hint": bool(it.get("Tags") and any(
                 isinstance(t, str) and t.lower().find("gguf") >= 0 for t in it["Tags"])),
         })
@@ -97,7 +112,8 @@ def _ms_files(repo):
         path = f.get("Path") or ""
         if GGUF_RE.search(path):
             out.append({"source": "modelscope", "repo": repo, "file": path,
-                        "size": f.get("Size"), "quant": _quant_of(path)})
+                        "size": f.get("Size"), "quant": _quant_of(path),
+                        "params": _params_of(path)})
     return out[:FILES_LIMIT]
 
 
@@ -127,6 +143,7 @@ def _hf_search(q, limit):
             "title": rid,
             "downloads": it.get("downloads") or 0,
             "stars": it.get("likes") or 0,
+            "params": _params_of(rid),
             "gguf_hint": any(t.find("gguf") >= 0 for t in tags) or any(
                 GGUF_RE.search(s.get("rfilename") or "") for s in sib),
         })
@@ -141,7 +158,8 @@ def _hf_files(repo):
         path = s.get("rfilename") or ""
         if GGUF_RE.search(path):
             out.append({"source": "hf", "repo": repo, "file": path,
-                        "size": s.get("size"), "quant": _quant_of(path)})
+                        "size": s.get("size"), "quant": _quant_of(path),
+                        "params": _params_of(path)})
     return out[:FILES_LIMIT]
 
 
