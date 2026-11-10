@@ -28,7 +28,7 @@ from models import ModelError, delete_model, resolve_models_dir, scan as scan_mo
 from settings import Settings
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 MILESTONE = "M3"
 
 # 限制
