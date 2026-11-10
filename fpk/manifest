@@ -1,5 +1,5 @@
 appname               = llamacpp
-version               = 0.4.4
+version               = 0.4.5
 display_name          = llama.cpp
 desc                  = 本地大模型推理服务：llama.cpp 原生二进制运行（无 Docker），提供 OpenAI 兼容 API、聊天界面与模型管理，支持 NVIDIA GPU 自动加速。
 platform              = x86
@@ -14,4 +14,4 @@ desktop_applaunchname = llamacpp.Application
 service_port          = 18080
 checkport             = false
 ctl_stop              = true
-changelog             = 市场推荐列表按本机内存配置推荐（物理内存+显存预算，超预算自动剔除），逐仓探测只保留真实含 .gguf 的仓库，排除 mmproj/imatrix/mtp 等辅助文件，每项标注可运行/勉强与最小量化档位大小。
+changelog             = 修复加速变体安装失败（下载白名单漏查内置域名，GitHub 直连被误拒）；变体推荐按 GPU 架构代次过滤，CUDA 13 不再推荐给 Pascal 架构显卡（如 MX330/GTX 10 系），自动改推 CUDA 12.8 变体。

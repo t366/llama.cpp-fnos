@@ -54,12 +54,16 @@ def _host_of(url):
 
 
 def _host_allowed(host, extra_suffixes):
+    """DEFAULT 白名单恒生效，extra_suffixes 为运行期追加（如 Gitea 镜像 host）。
+
+    注意：extra 是"追加"而非"替换"——0.4.4 及以前本函数只检查 extra，
+    变体下载（github 源无 extra）因此必然被拒（真机 0.4.4 实测报错）。
+    """
     if not host:
         return False
-    if extra_suffixes:
-        for suffix in extra_suffixes:
-            if host == suffix or host.endswith("." + suffix):
-                return True
+    for suffix in tuple(DEFAULT_HOST_SUFFIXES) + tuple(extra_suffixes or ()):
+        if host == suffix or host.endswith("." + suffix):
+            return True
     return False
 
 

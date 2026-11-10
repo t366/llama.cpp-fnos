@@ -4,8 +4,9 @@
 
 检测项（全部容错，任何一步失败不影响整体）：
 - 架构：platform.machine() → x86_64 / aarch64
-- NVIDIA：nvidia-smi 读型号/驱动/显存；驱动主版本对照内置 CUDA 支持表
-  （CUDA 13.x 需 >=580，CUDA 12.x 需 >=525，均为 Linux 官方最低驱动）
+- NVIDIA：nvidia-smi 读型号/驱动/显存/架构代次(compute_cap)；按驱动主版本
+  与 CC 对照内置 CUDA 支持表（CUDA 13.x 需 >=580 且 CC>=7.0，
+  CUDA 12.x 需 >=525，均为 Linux 官方最低驱动）
 - Vulkan：/usr/share/vulkan/icd.d/*.json 存在非空，或 vulkaninfo 可执行
 推荐顺序：cuda-13.5 > cuda-12.8 > vulkan > cpu（ARM 不做 CUDA，见设计 §4.3）。
 """
@@ -18,10 +19,13 @@ import re
 import shutil
 import subprocess
 
-# 驱动主版本 → 支持的 CUDA 变体档位（从高到低取第一个满足的）
+# 驱动主版本 → 支持的 CUDA 变体档位（从高到低取第一个满足的）。
+# min_cc：该 CUDA 大版本对 GPU 架构代次（compute capability）的最低要求。
+# CUDA 13.x 移除了 Maxwell/Pascal/Volta（CC<7.0）支持——Pascal 卡（如
+# MX330/MX150/GTX10xx，CC 6.x）即使驱动 ≥580 也只能用 CUDA 12.x 变体。
 CUDA_DRIVER_TABLE = (
-    (580, "cuda-13.5"),
-    (525, "cuda-12.8"),
+    (580, "cuda-13.5", 7.0),
+    (525, "cuda-12.8", None),   # CUDA 12.x 支持 sm_50+，无架构下限
 )
 CUDA_VARIANTS = ("x86_64",)  # ARM 不做 CUDA（设计 §4.3）
 
@@ -44,7 +48,7 @@ def _detect_nvidia():
         return None
     try:
         out = subprocess.run(
-            [exe, "--query-gpu=name,driver_version,memory.total",
+            [exe, "--query-gpu=name,driver_version,memory.total,compute_cap",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=SMI_TIMEOUT,
         )
@@ -55,17 +59,21 @@ def _detect_nvidia():
     # 多卡取第一行；字段可能带引号与逗号（部分驱动型号名含逗号）
     first = out.stdout.strip().splitlines()[0]
     parts = [p.strip().strip('"') for p in first.split(",")]
-    if len(parts) < 3:
+    if len(parts) < 4:
         return None
-    name, driver, mem = parts[0], parts[1], parts[2]
+    name, driver, mem, cc = parts[0], parts[1], parts[2], parts[3]
     m = re.search(r"\d+", driver)
     driver_major = int(m.group()) if m else 0
     try:
         mem_mib = int(float(mem))
     except ValueError:
         mem_mib = None
+    try:
+        compute_cap = float(cc) if cc else None
+    except ValueError:
+        compute_cap = None
     return {"name": name, "driver": driver, "driver_major": driver_major,
-            "memory_mib": mem_mib}
+            "memory_mib": mem_mib, "compute_cap": compute_cap}
 
 
 def _detect_vulkan():
@@ -115,12 +123,16 @@ def _detect_memory():
 
 
 def cuda_variant_for(gpu, machine):
-    """按驱动主版本给出可用 CUDA 变体名；不满足/非 x86 返回 None。"""
+    """按驱动版本与 GPU 架构代次给出可用 CUDA 变体名；不满足/非 x86 返回 None。"""
     if gpu is None or machine not in CUDA_VARIANTS:
         return None
-    for min_driver, variant in CUDA_DRIVER_TABLE:
-        if gpu["driver_major"] >= min_driver:
-            return "%s-%s" % (variant, machine)
+    cc = gpu.get("compute_cap")
+    for min_driver, variant, min_cc in CUDA_DRIVER_TABLE:
+        if gpu["driver_major"] < min_driver:
+            continue
+        if min_cc is not None and cc is not None and cc < min_cc:
+            continue   # 架构代次低于该 CUDA 大版本下限（如 Pascal vs CUDA 13）
+        return "%s-%s" % (variant, machine)
     return None
 
 
