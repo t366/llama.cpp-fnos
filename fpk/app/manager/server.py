@@ -24,11 +24,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from engine import Engine
+from models import ModelError, delete_model, resolve_models_dir, scan as scan_models
 from settings import Settings
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.2.2"
-MILESTONE = "M2"
+APP_VERSION = "0.3.0"
+MILESTONE = "M3"
 
 # 限制
 BODY_MAX_BYTES = 1024 * 1024      # 请求体上限 1MB（设计 §4.6）
@@ -106,6 +107,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.handle_logs(query)
             elif path == "/api/settings":
                 self.send_json({"ok": True, "settings": settings.get()})
+            elif path == "/api/models":
+                self.handle_models_list()
             else:
                 self.send_error_json(NOT_FOUND, "not found: %s" % path)
         except Exception as exc:  # 防御：任何路由内异常都回 JSON 而非断连
@@ -143,7 +146,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(INTERNAL_ERROR, "internal error: %s" % exc)
 
     def do_DELETE(self):
-        self.send_error_json(NOT_FOUND, "not found")
+        path = urlparse(self.path).path
+        try:
+            if path == "/api/models":
+                body, err = self._read_json_body()
+                if err:
+                    self.send_error_json(BAD_REQUEST, err)
+                    return
+                root = self._models_root()
+                try:
+                    removed = delete_model(root, body.get("path"))
+                except ModelError as exc:
+                    self.send_error_json(BAD_REQUEST, str(exc))
+                    return
+                self.send_json({"ok": True, "removed": removed})
+            else:
+                self.send_error_json(NOT_FOUND, "not found: %s" % path)
+        except Exception as exc:
+            self.send_error_json(INTERNAL_ERROR, "internal error: %s" % exc)
 
     # ---------- 处理器 ----------
     def handle_status(self):
@@ -177,6 +197,15 @@ class Handler(BaseHTTPRequestHandler):
             tail = DEFAULT_LOG_TAIL
         self.send_json({"ok": True, "lines": engine.logs(tail)})
 
+    def _models_root(self):
+        return resolve_models_dir(engine.data_dir, settings.value("models_dir"))
+
+    def handle_models_list(self):
+        root = self._models_root()
+        found = scan_models(root)
+        self.send_json({"ok": True, "models_dir": root,
+                        "count": len(found), "models": found})
+
 
 def _terminate_engine_and_exit():
     if engine is not None:
@@ -202,7 +231,7 @@ def main():
     atexit.register(_terminate_engine_and_exit)
 
     server = ManagerServer((args.host, args.port), Handler)
-    print("[%s] manager %s (M2) listening on %s:%d, app=%s, data=%s"
+    print("[%s] manager %s (M3) listening on %s:%d, app=%s, data=%s"
           % (APP_NAME, APP_VERSION, args.host, args.port, args.app_dir, args.data_dir),
           flush=True)
     try:

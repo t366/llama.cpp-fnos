@@ -87,6 +87,20 @@
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .empty { color: #98a2b0; font-size: 13px; padding: 8px 0; }
+  /* 模型列表 */
+  .model-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid #eef0f4; }
+  .model-row:last-child { border-bottom: 0; }
+  .model-row .m-info { flex: 1; min-width: 0; }
+  .m-name { font-weight: 600; word-break: break-all; }
+  .m-meta { font-size: 12px; color: #98a2b0; margin-top: 2px; }
+  .m-acts { display: flex; gap: 8px; flex-shrink: 0; }
+  button.act.small { padding: 6px 12px; font-size: 13px; }
+  .count { color: #98a2b0; font-weight: 400; font-size: 12px; }
+  /* 聊天 iframe */
+  iframe#chatFrame {
+    width: 100%; height: clamp(360px, calc(100vh - 230px), 720px);
+    border: 0; border-radius: 10px; background: #fff; display: none;
+  }
 </style>
 </head>
 <body>
@@ -99,6 +113,8 @@
 
   <nav class="tabs">
     <button data-page="status" class="active">状态</button>
+    <button data-page="models">模型</button>
+    <button data-page="chat">聊天</button>
     <button data-page="logs">日志</button>
     <button data-page="settings">设置</button>
   </nav>
@@ -125,6 +141,34 @@
     </div>
   </section>
 
+  <!-- 模型页 -->
+  <section class="page" id="page-models">
+    <div class="card">
+      <h2>模型目录</h2>
+      <div class="grid">
+        <div class="k">扫描目录</div>
+        <div class="v" id="modelsDir">—</div>
+      </div>
+      <div class="btns">
+        <button class="act" id="btnScan">重新扫描</button>
+        <button class="act" id="btnGotoModelsDir">修改目录（设置页）</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>已发现模型 <span class="count" id="modelCount"></span></h2>
+      <div id="modelList"><div class="empty">点击「重新扫描」开始查找 .gguf 文件</div></div>
+    </div>
+  </section>
+
+  <!-- 聊天页 -->
+  <section class="page" id="page-chat">
+    <div class="card">
+      <h2>聊天（llama-server 内置界面）</h2>
+      <div class="alert info" id="chatTip" style="display:none"></div>
+      <iframe id="chatFrame" title="llama-server WebUI"></iframe>
+    </div>
+  </section>
+
   <!-- 日志页 -->
   <section class="page" id="page-logs">
     <div class="card">
@@ -141,6 +185,13 @@
   <section class="page" id="page-settings">
     <div class="card">
       <h2>引擎设置</h2>
+      <div class="form-row">
+        <label>选择模型</label>
+        <select id="fModelPick">
+          <option value="">— 从已扫描模型中选择 —</option>
+        </select>
+        <div class="hint">选项来自「模型」页扫描结果；也可在下方直接填写路径</div>
+      </div>
       <div class="form-row">
         <label>模型路径</label>
         <input type="text" id="fModel" placeholder="/vol1/.../model-Q4_K_M.gguf">
@@ -231,6 +282,8 @@
       btn.classList.add("active");
       document.querySelectorAll("section.page").forEach(function (p) { p.classList.remove("active"); });
       $("page-" + btn.dataset.page).classList.add("active");
+      if (btn.dataset.page === "chat") { renderChat(); }
+      else if (btn.dataset.page === "models") { refreshModels(); }
     });
   });
 
@@ -285,7 +338,8 @@
 
   function esc(v) {
     return String(v === null || v === undefined ? "" : v)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   function refreshStatus() {
@@ -329,6 +383,123 @@
   });
   if ($("logAuto").checked) { timers.logs = setInterval(refreshLogs, 2000); }
 
+  // ---------- 模型页 ----------
+  function fmtTime(ts) {
+    var d = new Date(ts * 1000);
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function fillModelPicker(models) {
+    var sel = $("fModelPick");
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">— 从已扫描模型中选择 —</option>' +
+      models.map(function (m) {
+        return '<option value="' + esc(m.path) + '">' +
+          esc(m.name) + "（" + m.size_human + "）</option>";
+      }).join("");
+    if (cur) { sel.value = cur; }
+  }
+
+  function renderModelList(models) {
+    var box = $("modelList");
+    if (!models.length) {
+      box.innerHTML = '<div class="empty">未发现 .gguf 文件。请把 GGUF 放入扫描目录（支持子目录），或在设置页修改模型目录。</div>';
+      return;
+    }
+    box.innerHTML = models.map(function (m) {
+      var isCur = state.settings && state.settings.model === m.path;
+      var meta = m.size_human + " · " + fmtTime(m.mtime) + (isCur ? " · 当前引擎模型" : "");
+      return '<div class="model-row">' +
+        '<div class="m-info"><div class="m-name">' + esc(m.name) + '</div>' +
+        '<div class="m-meta">' + esc(meta) + '</div></div>' +
+        '<div class="m-acts">' +
+        '<button class="act small" data-use="' + esc(m.path) + '">设为引擎模型</button>' +
+        '<button class="act small danger" data-del="' + esc(m.path) + '">删除</button>' +
+        '</div></div>';
+    }).join("");
+  }
+
+  function refreshModels() {
+    return api("GET", "api/models").then(function (d) {
+      $("modelsDir").textContent = d.models_dir;
+      $("modelCount").textContent = "共 " + d.count + " 个";
+      renderModelList(d.models || []);
+      fillModelPicker(d.models || []);
+    }).catch(function (e) { toast("扫描失败：" + e.message); });
+  }
+
+  function setEngineModel(path) {
+    var payload = {};
+    var s = state.settings || {};
+    for (var k in s) { payload[k] = s[k]; }
+    payload.model = path;
+    api("PUT", "api/settings", payload).then(function (d) {
+      if (!d.ok) { toast("设置失败：" + (d.error || "未知错误")); return; }
+      fillSettings(d.settings);
+      toast("已设为引擎模型；若引擎运行中，重启后生效");
+      refreshModels();
+      refreshStatus();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  }
+
+  function deleteModel(path) {
+    api("DELETE", "api/models", { path: path }).then(function (d) {
+      if (!d.ok) { toast("删除失败：" + (d.error || "未知错误")); return; }
+      toast("已删除：" + path);
+      refreshModels();
+    }).catch(function (e) { toast("请求失败：" + e.message); });
+  }
+
+  $("modelList").addEventListener("click", function (ev) {
+    var t = ev.target;
+    if (!t.getAttribute) { return; }
+    var use = t.getAttribute("data-use");
+    var del = t.getAttribute("data-del");
+    if (use) { setEngineModel(use); }
+    else if (del) {
+      if (confirm("确定删除该模型文件？此操作不可恢复。\n" + del)) { deleteModel(del); }
+    }
+  });
+  $("btnScan").addEventListener("click", refreshModels);
+  $("btnGotoModelsDir").addEventListener("click", function () {
+    var b = document.querySelector('nav.tabs button[data-page="settings"]');
+    if (b) { b.click(); }
+  });
+
+  // ---------- 聊天页 ----------
+  function renderChat() {
+    var tip = $("chatTip");
+    var frame = $("chatFrame");
+    var eng = state.engine;
+    var msg = "";
+    var show = false;
+    if (location.protocol === "https:") {
+      msg = "当前为公网 HTTPS 环境，浏览器禁止内嵌内网 HTTP 页面。" +
+        "请从内网访问飞牛桌面（http://" + location.hostname + ":5000）后再使用聊天。" +
+        "推理 API 本身是否公网可达取决于你的端口映射，与聊天页无关。";
+    } else if (!eng || eng.state !== "running") {
+      msg = "引擎未运行。请先到「状态」页启动引擎，再回到本页。";
+    } else {
+      show = true;
+    }
+    tip.textContent = msg;
+    tip.style.display = msg ? "" : "none";
+    if (show) {
+      var url = "http://" + location.hostname + ":" + eng.port + "/";
+      if (frame.getAttribute("data-src") !== url) {
+        frame.src = url;
+        frame.setAttribute("data-src", url);
+      }
+      frame.style.display = "";
+    } else {
+      frame.style.display = "none";
+      frame.src = "about:blank";
+      frame.removeAttribute("data-src");
+    }
+  }
+
   // ---------- 设置页 ----------
   function fillSettings(s) {
     state.settings = s;
@@ -347,8 +518,15 @@
   function loadSettings() {
     return api("GET", "api/settings").then(function (d) {
       fillSettings(d.settings);
+      return api("GET", "api/models");
+    }).then(function (d) {
+      fillModelPicker((d && d.models) || []);
     }).catch(function (e) { toast("读取设置失败：" + e.message); });
   }
+
+  $("fModelPick").addEventListener("change", function () {
+    if (this.value) { $("fModel").value = this.value; }
+  });
 
   $("btnSave").addEventListener("click", function () {
     var payload = {
