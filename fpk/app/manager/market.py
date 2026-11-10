@@ -30,11 +30,17 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 MS_API = "https://www.modelscope.cn/api/v1"
 HF_MIRROR = "https://hf-mirror.com"
 DEFAULT_LIMIT = 15
 FILES_LIMIT = 60
+# 推荐列表（LM Studio 式"为本机推荐"）：候选池与探测并发
+RECOMMEND_QUERY = "GGUF"
+REC_POOL = 40
+REC_CONCURRENCY = 8
+RAM_OVERHEAD_MIB = 1536   # 运行余量（MiB），与前端 ramTag 同口径
 
 GGUF_RE = re.compile(r"\.gguf$", re.IGNORECASE)
 # 从文件名提取量化后缀（Q4_K_M / IQ3_XS / F16 等），供前端展示
@@ -280,6 +286,64 @@ def search(source, q, limit=DEFAULT_LIMIT):
     # GGUF 仓库优先展示，其次按下载量
     items.sort(key=lambda x: (not x.get("gguf_hint"), -x.get("downloads", 0)))
     return items
+
+
+def recommend(avail_mib, limit=DEFAULT_LIMIT):
+    """按本机配置推荐 GGUF 模型（LM Studio 式"为本机推荐"）。
+
+    流程：搜索 GGUF 候选池 → 逐仓拉取文件列表（并发探测）→ 只保留真实含
+    .gguf 文件的仓库 → 以"最小完整档位"（分片 GGUF 按完整模型求和）预估
+    内存占用，剔除本机跑不动的仓库 → 适配度优先、下载量次之排序。
+    avail_mib：可用内存 MiB（物理内存 + 加速变体下的显存）；0/None 时
+    不做内存过滤。条目在搜索条目之上追加：
+    min_file / min_size / min_quant / fit("ok"|"tight"|None) / pct。
+    """
+    pool = _ms_search(RECOMMEND_QUERY, REC_POOL)
+    split_re = re.compile(r"-\d{4,5}-of-\d{4,5}\.gguf$", re.IGNORECASE)
+    # 辅助 GGUF（mmproj 视觉投影 / imatrix 校准矩阵 / mtp、draft 投机解码
+    # 模块）远小于或非独立模型本体，不剔除会把 27B 模型误判成十几 MB
+    aux_re = re.compile(r"(?:^|[/\\])(?:mmproj|imatrix|mtp|draft)[^/\\]*\.gguf$",
+                        re.IGNORECASE)
+
+    def probe(it):
+        try:
+            files = _ms_files(it["repo"])
+        except MarketError:
+            return None
+        if not files:
+            return None              # 仓库实际不含 .gguf → 不展示
+        groups = {}                  # 分片（-00001-of-00003）按完整模型分组求和
+        for f in files:
+            if aux_re.search(f["file"]):
+                continue
+            key = split_re.sub(".gguf", f["file"])
+            g = groups.setdefault(key, {"size": 0, "quant": f.get("quant")})
+            g["size"] += f.get("size") or 0
+        if not groups:
+            return None              # 只有辅助文件、没有模型本体 → 不展示
+        key, best = min(groups.items(), key=lambda kv: kv[1]["size"])
+        item = dict(it)
+        item["min_file"] = key
+        item["min_size"] = best["size"]
+        item["min_quant"] = best["quant"]
+        if avail_mib:
+            required = best["size"] / 1048576 + RAM_OVERHEAD_MIB
+            pct = required / avail_mib
+            if pct > 1.0:
+                return None          # 最轻档位都超内存预算 → 本机跑不动
+            item["fit"] = "ok" if pct < 0.8 else "tight"
+            item["pct"] = round(pct, 3)
+        else:
+            item["fit"] = None
+            item["pct"] = None
+        return item
+
+    with ThreadPoolExecutor(max_workers=REC_CONCURRENCY) as ex:
+        futs = [ex.submit(probe, it) for it in pool]
+        out = [r for f in futs for r in [f.result()] if r]
+    # 适配度优先（可运行在前），同档按下载量
+    out.sort(key=lambda x: (x.get("fit") != "ok", -(x.get("downloads") or 0)))
+    return out[:limit]
 
 
 def list_files(source, repo):

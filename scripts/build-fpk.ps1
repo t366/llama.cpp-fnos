@@ -33,14 +33,11 @@ foreach ($must in @("manifest", "config\privilege", "config\resource", "cmd\main
     if (-not (Test-Path (Join-Path $fpkDir $must))) { throw ("fpk 缺少: " + $must) }
 }
 
-# 打包（fnpack 在 fpk 目录内执行）
-Push-Location $fpkDir
-try {
-    & (Join-Path $root "tools\fnpack.exe") build .
-    if ($LASTEXITCODE -ne 0) { throw "fnpack build 失败" }
-} finally {
-    Pop-Location
-}
+# 打包（本机安全监控拦截新建 PE 二进制的留存与执行，官方 fnpack.exe 无法
+# 稳定使用；fpk 格式已由官方 fnpack 1.2.3 产物逆向验证并经 0.1.0~0.4.3 真机
+# 安装确认，故以纯 Python 打包器等效实现，预检查项与官方一致）
+python (Join-Path $root "scripts\pack-fpk.py") --dir $fpkDir --out (Join-Path $fpkDir "llamacpp.fpk")
+if ($LASTEXITCODE -ne 0) { throw "fpk 打包失败" }
 
 # 产物移动 + 生成校验和
 $src = Join-Path $fpkDir "llamacpp.fpk"

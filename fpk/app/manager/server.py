@@ -17,6 +17,7 @@
 - GET  /api/models                  本地扫描
 - GET  /api/models/search?q=&source=&limit=   模型市场搜索
 - GET  /api/models/files?source=&repo=        仓库内 GGUF 文件列表
+- GET  /api/models/recommend?limit=           按本机内存推荐 GGUF 模型（仅含 .gguf 的仓库）
 - POST /api/models/download         市场模型下载（后台任务）
 - GET  /api/tasks、/api/tasks/<id>  任务列表/进度轮询；POST /api/tasks/<id>/cancel
 被停止（TERM）或退出时自动终止 llama-server 子进程。
@@ -41,7 +42,7 @@ from settings import Settings
 from tasks import TaskRegistry
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.4.3"
+APP_VERSION = "0.4.4"
 MILESTONE = "M4"
 
 # 限制
@@ -135,6 +136,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.handle_market_files(query)
             elif path == "/api/models/detail":
                 self.handle_market_detail(query)
+            elif path == "/api/models/recommend":
+                self.handle_market_recommend(query)
             elif path == "/api/tasks":
                 self.send_json({"ok": True, "tasks": self._task_views()})
             elif path.startswith("/api/tasks/"):
@@ -320,6 +323,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(BAD_REQUEST, str(exc))
             return
         self.send_json({"ok": True, "detail": detail})
+
+    def handle_market_recommend(self, query):
+        """按本机配置推荐：可用内存 = 物理内存 +（加速变体下的）显存，
+        与前端 ramTag 同口径；逐仓探测只保留真实含 .gguf 的仓库。"""
+        try:
+            limit = int(query.get("limit", [market.DEFAULT_LIMIT])[0])
+        except ValueError:
+            limit = market.DEFAULT_LIMIT
+        limit = max(1, min(limit, 30))
+        hw = _hardware()
+        avail = hw.get("mem_total_mib") or 0
+        rec = hw.get("recommended") or ""
+        if rec.startswith(("cuda-", "vulkan-")):
+            avail += (hw.get("gpu") or {}).get("memory_mib") or 0
+        try:
+            items = market.recommend(avail or None, limit)
+        except market.MarketError as exc:
+            self.send_error_json(BAD_REQUEST, str(exc))
+            return
+        self.send_json({"ok": True, "count": len(items), "items": items,
+                        "avail_mib": avail or None})
 
     def handle_model_download(self):
         body, err = self._read_json_body()

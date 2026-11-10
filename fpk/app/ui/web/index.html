@@ -863,17 +863,29 @@
   function renderRepoList(items, q) {
     var box = $("marketList");
     if (!items.length) {
-      box.innerHTML = '<div class="empty">没有匹配的仓库，换个关键词试试</div>';
+      box.innerHTML = '<div class="empty">' +
+        (q ? "没有匹配的仓库，换个关键词试试" : "本机内存预算内暂无可用推荐") + '</div>';
       return;
     }
     var label = '<div class="sec-label">' +
-      (q ? "搜索结果 · " + items.length : "推荐") + '</div>';
+      (q ? "搜索结果 · " + items.length
+         : "本机推荐 · 按内存适配 · 仅含 GGUF") + '</div>';
     box.innerHTML = label + items.map(function (it) {
       var pt = it.params
         ? ' <span class="tag">' + esc(it.params) + '</span>' : "";
-      var gt = it.gguf_hint ? ' <span class="tag ok">GGUF</span>' : "";
+      // 推荐模式下已全部过滤为 GGUF，GGUF 标注换成内存适配度
+      var ft = "";
+      if (!q && it.fit) {
+        ft = it.fit === "ok"
+          ? ' <span class="tag ok">可运行</span>'
+          : ' <span class="tag warn">勉强</span>';
+      }
+      var gt = !ft && it.gguf_hint ? ' <span class="tag ok">GGUF</span>' : "";
       var meta = "下载 " + fmtNum(it.downloads) +
         (it.stars ? " · 赞 " + fmtNum(it.stars) : "");
+      if (!q && it.min_size) {
+        meta += " · 最小档 " + esc(it.min_quant || "量化") + " " + fmtSize(it.min_size);
+      }
       return '<div class="repo-row" data-repo="' + esc(it.repo) + '" ' +
         'data-source="' + esc(it.source) + '">' +
         '<div class="m-name">' + esc(it.title) + pt + gt + '</div>' +
@@ -890,7 +902,17 @@
       return;
     }
     closeRepoDetail();
-    $("marketList").innerHTML = '<div class="empty">搜索中…</div>';
+    $("marketList").innerHTML = '<div class="empty">' +
+      (q ? "搜索中…" : "正在为本机挑选可运行的模型…") + '</div>';
+    if (!q) {  // 空关键词 = 本机推荐：按内存适配 + 仅真实含 .gguf 的仓库
+      api("GET", "api/models/recommend?limit=15").then(function (d) {
+        if (!d.ok) { $("marketList").innerHTML = ""; toast(d.error || "推荐获取失败"); return; }
+        renderRepoList(d.items || [], q);
+      }).catch(function (e) {
+        $("marketList").innerHTML = '<div class="empty">推荐获取失败：' + esc(e.message) + '</div>';
+      });
+      return;
+    }
     api("GET", "api/models/search?source=" + encodeURIComponent(source) +
         "&q=" + encodeURIComponent(q) + "&limit=15").then(function (d) {
       if (!d.ok) { $("marketList").innerHTML = ""; toast(d.error || "搜索失败"); return; }
@@ -900,7 +922,7 @@
     });
   }
 
-  // 首次进入模型页时自动拉取推荐列表（空关键词，ModelScope 源可用）
+  // 首次进入模型页时自动拉取本机推荐（按内存适配 + 仅 GGUF）
   function ensureMarketRecommend() {
     if (marketLoaded) { return; }
     marketLoaded = true;
