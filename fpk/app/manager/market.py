@@ -8,12 +8,19 @@ API 形态均为真机/实测确认（2026-11）：
   → Data.Model.Models[]（Path/Name/Downloads/TotalCount）
 - ModelScope 文件列表：GET .../api/v1/models/{owner}/{name}/repo/files?Revision=master
   → Data.Files[]（Path/Size/Type=="blob"）
+- ModelScope 仓库详情：GET .../api/v1/models/{owner}/{name}
+  → Data（ChineseName/Downloads/Stars/LastUpdatedTime(unix 秒)/License/
+    Tags/Tasks[].Name/ReadMeContent —— README 原文直接内含，无需二次拉取）
 - ModelScope 下载：.../api/v1/models/{repo}/repo?Revision=master&FilePath={path}
   （302 → cdn-lfs-cn-*.modelscope.cn，支持 Range 续传）
 - hf-mirror 同 huggingface.co 路径约定：
   搜索 GET /api/models?search=&limit= → 数组（author/id/downloads/likes）
-  文件 GET /api/models/{repo}?blobs=true → siblings[].rfilename/size
+  详情 GET /api/models/{repo}?blobs=true
+    → lastModified(ISO)/downloads/likes/tags/pipeline_tag/siblings
+  README GET /{repo}/raw/main/README.md → 原文（带 YAML frontmatter，展示前剥离）
   下载 GET /{repo}/resolve/main/{path}（Accept-Ranges: bytes）
+- 空关键词搜索：ModelScope 可用（Default 排序即推荐列表）；
+  hf-mirror 返回新建仓库不适合做推荐，故默认源为 ModelScope。
 
 统一输出条目：{"source", "repo", "file", "size", "quant"}（size 可为 None）。
 """
@@ -37,6 +44,30 @@ QUANT_RE = re.compile(
 # 从名称提取参数规模（0.6B / 7B / 8x7B / 72B…），供 LM Studio 式卡片展示
 PARAM_RE = re.compile(
     r"(\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?)?)B(?![A-Za-z0-9])", re.IGNORECASE)
+# README 展示截断长度
+README_LIMIT = 12000
+# YAML frontmatter（hf raw README 开头的元数据块），展示前剥离
+FM_RE = re.compile(r"\A-{3,}\s*\n.*?\n-{3,}\s*\n?", re.DOTALL)
+# 仓库 tags → 能力标签分组（按顺序取首个命中，每仓最多展示 6 个）
+CAP_GROUPS = (
+    ("vision", ("vision", "image-text-to-text", "multimodal", "any-to-any")),
+    ("tools", ("tool-use", "tools", "agents", "agent")),
+    ("reasoning", ("reasoning",)),
+    ("chat", ("conversational", "chat")),
+    ("embedding", ("embedding", "feature-extraction", "sentence-similarity",
+                   "reranker")),
+    ("t2i", ("text-to-image", "text2image", "image-generation")),
+    ("speech", ("automatic-speech-recognition", "text-to-speech", "audio",
+                "asr")),
+    ("textgen", ("text-generation",)),
+)
+CAP_LABELS = {"vision": "视觉", "tools": "工具调用", "reasoning": "推理",
+              "chat": "对话", "embedding": "向量", "t2i": "文生图",
+              "speech": "语音", "textgen": "文本生成"}
+# tags 里的基础设施/元信息前缀，不参与能力匹配
+TAG_SKIP_PREFIX = ("base_model:", "license:", "region:", "deploy:", "arxiv:",
+                   "endpoints", "transformers", "safetensors",
+                   "text-generation-inference", "dataset:")
 
 
 def _params_of(text):
@@ -73,6 +104,59 @@ def _http_json(url, payload=None, method=None, timeout=15):
 def _quant_of(filename):
     m = QUANT_RE.search(filename)
     return m.group(1).upper() if m else None
+
+
+def _strip_frontmatter(text):
+    """剥离 README 开头的 YAML frontmatter 元数据块。"""
+    return FM_RE.sub("", text or "", count=1).strip()
+
+
+def _clip_readme(text):
+    text = (text or "").strip()
+    if not text:
+        return None
+    if len(text) > README_LIMIT:
+        return text[:README_LIMIT] + "\n\n…（内容过长已截断，完整版见仓库主页）"
+    return text
+
+
+def _iso_to_unix(s):
+    """hf lastModified（ISO 8601）→ unix 秒；解析失败返回 None。"""
+    m = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})", str(s or ""))
+    if not m:
+        return None
+    try:
+        import calendar
+        from datetime import datetime
+        dt = datetime.strptime(m.group(1) + " " + m.group(2),
+                               "%Y-%m-%d %H:%M:%S")
+        return int(calendar.timegm(dt.timetuple()))
+    except ValueError:
+        return None
+
+
+def _capabilities(tags):
+    """tags → 能力标签列表 [{"key","label"}]；忽略基础设施类 tag。"""
+    tset = set()
+    for t in tags or []:
+        t = str(t).strip().lower()
+        if not t or t.startswith(TAG_SKIP_PREFIX):
+            continue
+        tset.add(t)
+    out = []
+    for key, names in CAP_GROUPS:
+        if tset & set(names):
+            out.append({"key": key, "label": CAP_LABELS[key]})
+    return out[:6]
+
+
+def _license_of(tags):
+    """从 hf tags（license:xxx）提取许可证名；无则 None。"""
+    for t in tags or []:
+        t = str(t).strip().lower()
+        if t.startswith("license:"):
+            return t.split(":", 1)[1] or None
+    return None
 
 
 # ---------- ModelScope ----------
@@ -153,6 +237,11 @@ def _hf_search(q, limit):
 def _hf_files(repo):
     url = "%s/api/models/%s?blobs=true" % (HF_MIRROR, urllib.parse.quote(repo, safe="/"))
     data = _http_json(url)
+    return _hf_files_from(repo, data)
+
+
+def _hf_files_from(repo, data):
+    """从已拉取的 ?blobs=true 详情响应中提取 GGUF 文件（避免二次请求）。"""
     out = []
     for s in data.get("siblings") or []:
         path = s.get("rfilename") or ""
@@ -161,6 +250,18 @@ def _hf_files(repo):
                         "size": s.get("size"), "quant": _quant_of(path),
                         "params": _params_of(path)})
     return out[:FILES_LIMIT]
+
+
+def _hf_readme(repo):
+    """拉取 hf raw README 原文；失败返回 None（不阻断详情）。"""
+    url = "%s/%s/raw/main/README.md" % (
+        HF_MIRROR, urllib.parse.quote(repo, safe="/"))
+    req = urllib.request.Request(url, headers={"User-Agent": "llamacpp-fnos-manager"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError):
+        return None
 
 
 def _hf_download_url(repo, path):
@@ -187,6 +288,73 @@ def list_files(source, repo):
     if not repo or "/" not in repo:
         raise MarketError("repo 格式应为 owner/name：%r" % repo)
     return _ms_files(repo) if source == "modelscope" else _hf_files(repo)
+
+
+def _ms_detail(repo):
+    url = "%s/models/%s" % (MS_API, urllib.parse.quote(repo, safe="/"))
+    data = _http_json(url)
+    if data.get("Code") != 200:
+        raise MarketError("ModelScope 返回 Code=%s" % data.get("Code"))
+    return data.get("Data") or {}
+
+
+def repo_detail(source, repo):
+    """仓库详情面板数据：元数据 + 能力标签 + README 摘要 + GGUF 文件列表。
+
+    统一输出：{"source","repo","title","downloads","stars","last_modified",
+              "license","params","gguf","capabilities","readme","files"}
+    last_modified 为 unix 秒（可能 None）；readme 为截断文本（可能 None）。
+    """
+    if source not in SOURCES:
+        raise MarketError("未知市场源：%s" % source)
+    if not repo or "/" not in repo:
+        raise MarketError("repo 格式应为 owner/name：%r" % repo)
+
+    if source == "modelscope":
+        d = _ms_detail(repo)
+        name = d.get("Name") or repo
+        tags = [str(t) for t in (d.get("Tags") or [])]
+        for t in d.get("Tasks") or []:
+            n = (t or {}).get("Name")
+            if n:
+                tags.append(n)
+        last = d.get("LastUpdatedTime")
+        if not isinstance(last, (int, float)) or last <= 0:
+            last = None
+        return {
+            "source": "modelscope", "repo": repo,
+            "title": d.get("ChineseName") or name,
+            "downloads": d.get("Downloads") or 0,
+            "stars": d.get("Stars") or 0,
+            "last_modified": last,
+            "license": d.get("License") or None,
+            "params": _params_of(name) or _params_of(repo),
+            "gguf": any(t.lower() == "gguf" for t in tags),
+            "capabilities": _capabilities(tags),
+            "readme": _clip_readme(_strip_frontmatter(d.get("ReadMeContent"))),
+            "files": _ms_files(repo),
+        }
+
+    d = _http_json("%s/api/models/%s?blobs=true"
+                   % (HF_MIRROR, urllib.parse.quote(repo, safe="/")))
+    tags = [str(t) for t in (d.get("tags") or [])]
+    if d.get("pipeline_tag"):
+        tags.append(d["pipeline_tag"])
+    sib_gguf = any(GGUF_RE.search(s.get("rfilename") or "")
+                   for s in (d.get("siblings") or []))
+    return {
+        "source": "hf", "repo": repo,
+        "title": d.get("modelId") or d.get("id") or repo,
+        "downloads": d.get("downloads") or 0,
+        "stars": d.get("likes") or 0,
+        "last_modified": _iso_to_unix(d.get("lastModified")),
+        "license": _license_of(tags),
+        "params": _params_of(d.get("modelId") or d.get("id") or repo),
+        "gguf": "gguf" in [t.lower() for t in tags] or sib_gguf,
+        "capabilities": _capabilities(tags),
+        "readme": _clip_readme(_strip_frontmatter(_hf_readme(repo))),
+        "files": _hf_files_from(repo, d),
+    }
 
 
 def download_url(source, repo, path):

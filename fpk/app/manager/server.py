@@ -41,7 +41,7 @@ from settings import Settings
 from tasks import TaskRegistry
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.4.2"
 MILESTONE = "M4"
 
 # 限制
@@ -133,6 +133,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.handle_market_search(query)
             elif path == "/api/models/files":
                 self.handle_market_files(query)
+            elif path == "/api/models/detail":
+                self.handle_market_detail(query)
             elif path == "/api/tasks":
                 self.send_json({"ok": True, "tasks": self._task_views()})
             elif path.startswith("/api/tasks/"):
@@ -308,6 +310,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json({"ok": True, "source": source, "repo": repo,
                         "count": len(files), "files": files})
+
+    def handle_market_detail(self, query):
+        source = query.get("source", [settings.value("market_source")])[0]
+        repo = (query.get("repo", [""])[0] or "").strip()
+        try:
+            detail = market.repo_detail(source, repo)
+        except market.MarketError as exc:
+            self.send_error_json(BAD_REQUEST, str(exc))
+            return
+        self.send_json({"ok": True, "detail": detail})
 
     def handle_model_download(self):
         body, err = self._read_json_body()

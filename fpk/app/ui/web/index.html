@@ -119,6 +119,41 @@
   .market-bar input:focus, .market-bar select:focus { outline: 2px solid #2f6fed33; border-color: #2f6fed; }
   .repo-row { padding: 11px 0; border-bottom: 1px solid #eef0f4; cursor: pointer; }
   .repo-row:last-child { border-bottom: 0; }
+  /* 市场双栏（LM Studio 式：左列表 + 右详情） */
+  .market-layout { display: flex; gap: 16px; align-items: flex-start; }
+  .market-left { flex: 0 0 300px; min-width: 0; }
+  .market-right { flex: 1 1 auto; min-width: 0; border-left: 1px solid #eef0f4; padding-left: 16px; }
+  .repo-list { max-height: 540px; overflow: auto; margin-top: 10px; }
+  .market-left .repo-row { padding: 10px 10px; border-radius: 9px; border-bottom: 0; }
+  .market-left .repo-row:hover { background: #f4f6fa; }
+  .repo-row.sel { background: #eef4fd; }
+  .repo-row.sel:hover { background: #e3edfb; }
+  .sec-label { font-size: 12px; color: #98a2b0; font-weight: 600; margin: 2px 0 4px 10px; }
+  .d-head { display: flex; align-items: flex-start; gap: 8px; }
+  .d-head .m-name { flex: 1; min-width: 0; word-break: break-all; font-size: 15px; }
+  .d-stats { font-size: 12px; color: #7b8494; margin-top: 6px; }
+  .d-tags { margin-top: 8px; }
+  .d-caps { margin-top: 10px; }
+  .cap { display: inline-block; padding: 3px 11px; border-radius: 999px; font-size: 12px;
+         margin: 0 6px 6px 0; background: #eef4fd; color: #2757b4; }
+  .cap.vision, .cap.t2i { background: #fff7e6; color: #9a6b00; }
+  .cap.tools { background: #eef4fd; color: #2757b4; }
+  .cap.reasoning { background: #f3eefd; color: #6b3fb4; }
+  .cap.chat, .cap.textgen { background: #e8f7ee; color: #1c7c46; }
+  .cap.embedding, .cap.speech { background: #fdf0f2; color: #b4396b; }
+  .d-sec { font-size: 13px; font-weight: 600; color: #333c49; margin: 16px 0 8px; }
+  pre.readme {
+    background: #f7f8fb; color: #3a4553; border: 1px solid #eef0f4; border-radius: 10px;
+    padding: 12px 14px; font-size: 12px; line-height: 1.6; max-height: 380px; overflow: auto;
+    white-space: pre-wrap; word-break: break-all; font-family: Consolas, Menlo, monospace;
+    margin: 0;
+  }
+  @media (max-width: 640px) {
+    .market-layout { flex-direction: column; }
+    .market-left { flex: none; width: 100%; }
+    .market-right { border-left: 0; padding-left: 0; }
+    .repo-list { max-height: 300px; }
+  }
   .file-row { display: flex; align-items: center; gap: 10px; padding: 8px 0 8px 14px;
               border-bottom: 1px dashed #eef0f4; font-size: 13px; }
   .file-row:last-child { border-bottom: 0; }
@@ -213,18 +248,23 @@
     </div>
     <div class="card">
       <h2>模型市场</h2>
-      <div class="market-bar">
-        <select id="mSource">
-          <option value="modelscope">ModelScope</option>
-          <option value="hf">HF 镜像</option>
-        </select>
-        <input type="text" id="mQuery" placeholder="搜索模型，如 qwen3">
-        <button class="act primary small" id="btnMarketSearch">搜索</button>
-      </div>
-      <div id="marketList"><div class="empty">输入关键词搜索在线模型仓库（点击仓库查看 GGUF 文件）</div></div>
-      <div id="marketFiles" style="display:none">
-        <div class="m-meta" id="mfRepo" style="margin-bottom:4px"></div>
-        <div id="mfList"></div>
+      <div class="market-layout">
+        <div class="market-left">
+          <div class="market-bar">
+            <select id="mSource">
+              <option value="modelscope">ModelScope</option>
+              <option value="hf">HF 镜像</option>
+            </select>
+            <input type="text" id="mQuery" placeholder="搜索模型，如 qwen3">
+            <button class="act primary small" id="btnMarketSearch">搜索</button>
+          </div>
+          <div id="marketList" class="repo-list">
+            <div class="empty">输入关键词搜索，或等待推荐加载</div>
+          </div>
+        </div>
+        <div class="market-right" id="repoDetail">
+          <div class="empty">← 点击左侧模型查看详情</div>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -376,7 +416,7 @@
       document.querySelectorAll("section.page").forEach(function (p) { p.classList.remove("active"); });
       $("page-" + btn.dataset.page).classList.add("active");
       if (btn.dataset.page === "chat") { renderChat(); }
-      else if (btn.dataset.page === "models") { refreshModels(); }
+      else if (btn.dataset.page === "models") { refreshModels(); ensureMarketRecommend(); }
     });
   });
 
@@ -771,20 +811,40 @@
     box.innerHTML = taskRowHtml(task);
   }
 
-  // ---------- M4：模型市场 ----------
-  function renderRepoList(items) {
+  // ---------- M4：模型市场（LM Studio 式双栏） ----------
+  var repoSel = null;      // 当前详情选中的 {repo, source}
+  var marketLoaded = false; // 推荐列表是否已自动加载过
+
+  function fmtNum(n) {
+    n = n || 0;
+    if (n >= 1000000) { return (n / 1000000).toFixed(1) + "M"; }
+    if (n >= 1000) { return (n / 1000).toFixed(1) + "k"; }
+    return String(n);
+  }
+
+  function agoTxt(unixSec) {
+    if (!unixSec) { return null; }
+    var days = Math.floor((Date.now() / 1000 - unixSec) / 86400);
+    if (days < 1) { return "今天更新"; }
+    if (days < 30) { return days + " 天前更新"; }
+    if (days < 365) { return Math.floor(days / 30) + " 个月前更新"; }
+    return Math.floor(days / 365) + " 年前更新";
+  }
+
+  function renderRepoList(items, q) {
     var box = $("marketList");
     if (!items.length) {
       box.innerHTML = '<div class="empty">没有匹配的仓库，换个关键词试试</div>';
       return;
     }
-    box.innerHTML = items.map(function (it) {
+    var label = '<div class="sec-label">' +
+      (q ? "搜索结果 · " + items.length : "推荐") + '</div>';
+    box.innerHTML = label + items.map(function (it) {
       var pt = it.params
         ? ' <span class="tag">' + esc(it.params) + '</span>' : "";
       var gt = it.gguf_hint ? ' <span class="tag ok">GGUF</span>' : "";
-      var meta = "下载量 " + (it.downloads || 0) +
-        (it.stars ? " · 赞 " + it.stars : "") +
-        " · " + esc(it.repo);
+      var meta = "下载 " + fmtNum(it.downloads) +
+        (it.stars ? " · 赞 " + fmtNum(it.stars) : "");
       return '<div class="repo-row" data-repo="' + esc(it.repo) + '" ' +
         'data-source="' + esc(it.source) + '">' +
         '<div class="m-name">' + esc(it.title) + pt + gt + '</div>' +
@@ -795,21 +855,34 @@
   function marketSearch() {
     var q = $("mQuery").value.trim();
     var source = $("mSource").value;
-    $("marketFiles").style.display = "none";
+    if (!q && source === "hf") {
+      $("marketList").innerHTML = '<div class="empty">HF 镜像请输入关键词搜索</div>';
+      closeRepoDetail();
+      return;
+    }
+    closeRepoDetail();
     $("marketList").innerHTML = '<div class="empty">搜索中…</div>';
     api("GET", "api/models/search?source=" + encodeURIComponent(source) +
         "&q=" + encodeURIComponent(q) + "&limit=15").then(function (d) {
       if (!d.ok) { $("marketList").innerHTML = ""; toast(d.error || "搜索失败"); return; }
-      renderRepoList(d.items || []);
+      renderRepoList(d.items || [], q);
     }).catch(function (e) {
       $("marketList").innerHTML = '<div class="empty">搜索失败：' + esc(e.message) + '</div>';
     });
+  }
+
+  // 首次进入模型页时自动拉取推荐列表（空关键词，ModelScope 源可用）
+  function ensureMarketRecommend() {
+    if (marketLoaded) { return; }
+    marketLoaded = true;
+    marketSearch();
   }
 
   $("btnMarketSearch").addEventListener("click", marketSearch);
   $("mQuery").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { marketSearch(); }
   });
+  $("mSource").addEventListener("change", marketSearch);
 
   // LM Studio 式内存适配预估：模型文件 + 1.5GiB 运行余量，
   // 对比可用内存（推荐 CUDA/Vulkan 变体时叠加显存）。无硬件数据则不显示。
@@ -828,48 +901,88 @@
     return { cls: "bad", txt: "内存不足" };
   }
 
-  function showMarketFiles(repo, source) {
-    $("marketFiles").setAttribute("data-repo", repo);
-    $("marketFiles").setAttribute("data-source", source);
-    $("mfList").innerHTML = '<div class="empty">获取文件列表中…</div>';
-    $("marketFiles").style.display = "";
-    $("mfRepo").textContent = repo + " · GGUF 文件";
-    api("GET", "api/models/files?source=" + encodeURIComponent(source) +
+  function fileRowHtml(f) {
+    var rt = ramTag(f.size);
+    return '<div class="file-row">' +
+      '<div class="f-name">' + esc(f.file) +
+      (f.quant ? ' <span class="tag">' + esc(f.quant) + '</span>' : "") +
+      (rt ? ' <span class="tag ' + rt.cls + '">' + rt.txt + '</span>' : "") + '</div>' +
+      '<div class="f-size">' + fmtSize(f.size) + '</div>' +
+      '<button class="act small primary" data-dl="' + esc(f.file) + '">下载</button>' +
+      '</div>';
+  }
+
+  function renderRepoDetail(d) {
+    var caps = (d.capabilities || []).map(function (c) {
+      return '<span class="cap ' + esc(c.key) + '">' + esc(c.label) + '</span>';
+    }).join("");
+    var tags = "";
+    if (d.params) { tags += '<span class="tag">参数 ' + esc(d.params) + '</span> '; }
+    if (d.gguf) { tags += '<span class="tag ok">GGUF</span> '; }
+    if (d.license) { tags += '<span class="tag">' + esc(d.license) + '</span> '; }
+    tags += '<span class="tag">' + (d.source === "hf" ? "HF 镜像" : "ModelScope") + '</span>';
+    var stats = "下载 " + fmtNum(d.downloads) +
+      (d.stars ? " · 赞 " + fmtNum(d.stars) : "");
+    var ago = agoTxt(d.last_modified);
+    if (ago) { stats += " · " + ago; }
+    var files = d.files || [];
+    var filesHtml = files.length
+      ? files.map(fileRowHtml).join("")
+      : '<div class="empty">该仓库未找到 .gguf 文件</div>';
+    var readme = d.readme
+      ? '<pre class="readme">' + esc(d.readme) + '</pre>'
+      : '<div class="empty">无 README</div>';
+    $("repoDetail").innerHTML =
+      '<div class="d-head"><div class="m-name">' + esc(d.title) + '</div>' +
+      '<button class="act small" id="dClose">✕</button></div>' +
+      '<div class="m-meta">' + esc(d.repo) + '</div>' +
+      '<div class="d-stats">' + stats + '</div>' +
+      '<div class="d-tags">' + tags + '</div>' +
+      (caps ? '<div class="d-caps">' + caps + '</div>' : "") +
+      '<div class="d-sec">下载选项</div>' + filesHtml +
+      '<div class="d-sec">README</div>' + readme;
+    $("dClose").addEventListener("click", closeRepoDetail);
+  }
+
+  function openRepoDetail(repo, source) {
+    repoSel = { repo: repo, source: source };
+    var rows = $("marketList").querySelectorAll(".repo-row");
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].className = "repo-row" +
+        (rows[i].getAttribute("data-repo") === repo ? " sel" : "");
+    }
+    $("repoDetail").innerHTML = '<div class="empty">加载详情中…</div>';
+    api("GET", "api/models/detail?source=" + encodeURIComponent(source) +
         "&repo=" + encodeURIComponent(repo)).then(function (d) {
-      if (!d.ok) { $("mfList").innerHTML = '<div class="empty">' + esc(d.error || "获取失败") + '</div>'; return; }
-      var files = d.files || [];
-      if (!files.length) {
-        $("mfList").innerHTML = '<div class="empty">该仓库未找到 .gguf 文件</div>';
+      if (!d.ok) {
+        $("repoDetail").innerHTML = '<div class="empty">' +
+          esc(d.error || "获取失败") + '</div>';
         return;
       }
-      $("mfList").innerHTML = files.map(function (f) {
-        var rt = ramTag(f.size);
-        return '<div class="file-row">' +
-          '<div class="f-name">' + esc(f.file) +
-          (f.quant ? ' <span class="tag">' + esc(f.quant) + '</span>' : "") +
-          (rt ? ' <span class="tag ' + rt.cls + '">' + rt.txt + '</span>' : "") + '</div>' +
-          '<div class="f-size">' + fmtSize(f.size) + '</div>' +
-          '<button class="act small primary" data-dl="' + esc(f.file) + '">下载</button>' +
-          '</div>';
-      }).join("");
+      renderRepoDetail(d.detail || {});
     }).catch(function (e) {
-      $("mfList").innerHTML = '<div class="empty">获取失败：' + esc(e.message) + '</div>';
+      $("repoDetail").innerHTML = '<div class="empty">获取失败：' + esc(e.message) + '</div>';
     });
+  }
+
+  function closeRepoDetail() {
+    repoSel = null;
+    var box = $("repoDetail");
+    if (box) { box.innerHTML = '<div class="empty">← 点击左侧模型查看详情</div>'; }
+    var rows = document.querySelectorAll(".repo-row.sel");
+    for (var i = 0; i < rows.length; i++) { rows[i].className = "repo-row"; }
   }
 
   $("marketList").addEventListener("click", function (ev) {
     var row = ev.target.closest ? ev.target.closest(".repo-row") : null;
-    if (row) { showMarketFiles(row.getAttribute("data-repo"), row.getAttribute("data-source")); }
+    if (row) { openRepoDetail(row.getAttribute("data-repo"), row.getAttribute("data-source")); }
   });
 
-  $("mfList").addEventListener("click", function (ev) {
+  $("repoDetail").addEventListener("click", function (ev) {
     var f = ev.target.getAttribute && ev.target.getAttribute("data-dl");
-    if (!f) { return; }
-    var box = $("marketFiles");
-    var source = box.getAttribute("data-source") || $("mSource").value;
-    var repo = box.getAttribute("data-repo");
+    if (!f || !repoSel) { return; }
     api("POST", "api/models/download", {
-      source: source, repo: repo, file: f
+      source: repoSel.source, repo: repoSel.repo, file: f
     }).then(function (d) {
       if (!d.ok) { toast(d.error || "发起下载失败"); return; }
       toast(d.note || "已开始下载：" + f.split("/").pop());
