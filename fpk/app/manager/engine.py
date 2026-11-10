@@ -12,6 +12,7 @@
 import collections
 import os
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -104,6 +105,22 @@ class Engine:
             cmd += ["--api-key", cfg["api_key"]]
         return cmd
 
+    def _check_port_free(self, host, port):
+        """启动前预检推理端口；被占用时给出明确提示，避免 llama-server 反复崩溃。
+        绑定测试带 SO_REUSEADDR：TIME_WAIT 不算占用，真实监听才算。"""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind((host, int(port)))
+            finally:
+                s.close()
+            return None
+        except OSError as exc:
+            return ("推理端口不可用：%s:%d（%s）。该端口可能已被其他程序占用，"
+                    "请在设置页更换推理端口后重试"
+                    % (host, int(port), exc))
+
     def start(self, reset_crashes=True):
         """返回 (ok, error)。失败不改变既有状态。
         reset_crashes=False 用于守护线程的自动重启（保持连续崩溃计数）。"""
@@ -120,6 +137,11 @@ class Engine:
             model, merr = self._resolve_model(cfg.get("model"))
             if merr:
                 return False, merr
+            perr = self._check_port_free(cfg.get("bind", "0.0.0.0"),
+                                         cfg.get("inference_port", 8080))
+            if perr:
+                self.log_line("[manager] 启动中止：" + perr)
+                return False, perr
             if model != cfg.get("model"):
                 self.log_line("[manager] 模型解析：%s -> %s" % (cfg.get("model"), model))
             self._log_rotate_if_needed()
