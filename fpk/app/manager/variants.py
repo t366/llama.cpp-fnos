@@ -18,8 +18,13 @@ import urllib.parse
 
 import downloader
 
-# 与 scripts/vendor-binaries.py 的 DEFAULT_TAG 保持一致
-PINNED_TAG = "b12229"
+# 与 scripts/vendor-binaries.py 的 DEFAULT_TAG 保持一致。
+# 选 b12220（2026-11-09）：官方 ubuntu x64 CPU/Vulkan 资产的 CI 构建基线仍为
+# ubuntu-22.04（GLIBC 2.35，兼容 fnOS/Debian 12 的 glibc 2.36）；其后的版本
+# 切到 ubuntu-24.04 基线（GLIBC 2.38+），在 fnOS 上报 "GLIBC_2.38 not found"。
+# 注意：官方 CUDA 资产自首次发布（b11000）起就基于 ubuntu-24.04 镜像，
+# 全系不兼容 fnOS——CUDA 变体改用自建 22.04 基线资产（Gitea 镜像分发）。
+PINNED_TAG = "b12220"
 GG_BASE = "https://github.com/ggml-org/llama.cpp/releases/download/%s" % PINNED_TAG
 
 # 变体 → 资产清单（os_part 按 GitHub 资产命名：x64 / arm64）

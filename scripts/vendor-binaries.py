@@ -3,7 +3,7 @@
 """下载 llama.cpp nightly 预编译 CPU 产物并 vendor 进 fpk 打包目录。
 
 用法（开发机，任意平台）：
-  python scripts/vendor-binaries.py                          # x86_64（tag 钉死 b12229）
+  python scripts/vendor-binaries.py                          # x86_64（tag 钉死 b12220）
   python scripts/vendor-binaries.py --arch aarch64           # ARM（M5）
   python scripts/vendor-binaries.py --base https://ghfast.top/https://github.com  # 走镜像
 
@@ -20,7 +20,7 @@ import tarfile
 import urllib.request
 from pathlib import Path, PurePosixPath
 
-DEFAULT_TAG = "b12229"
+DEFAULT_TAG = "b12220"
 
 
 def extract_members(tf, wanted):

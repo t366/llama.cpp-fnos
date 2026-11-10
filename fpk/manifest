@@ -1,5 +1,5 @@
 appname               = llamacpp
-version               = 0.4.5
+version               = 0.4.6
 display_name          = llama.cpp
 desc                  = 本地大模型推理服务：llama.cpp 原生二进制运行（无 Docker），提供 OpenAI 兼容 API、聊天界面与模型管理，支持 NVIDIA GPU 自动加速。
 platform              = x86
@@ -14,4 +14,4 @@ desktop_applaunchname = llamacpp.Application
 service_port          = 18080
 checkport             = false
 ctl_stop              = true
-changelog             = 修复加速变体安装失败（下载白名单漏查内置域名，GitHub 直连被误拒）；变体推荐按 GPU 架构代次过滤，CUDA 13 不再推荐给 Pascal 架构显卡（如 MX330/GTX 10 系），自动改推 CUDA 12.8 变体。
+changelog             = 修复安装变体报 "GLIBC_2.38 not found"：二进制源降级到 b12220（ubuntu-22.04 基线，兼容 fnOS 的 glibc 2.36）。注意：官方 CUDA 资产全系基于 ubuntu-24.04 构建、暂不可安装，NVIDIA 显卡请先安装 Vulkan 变体获得 GPU 加速（需 fnOS 已装 Vulkan 显卡驱动）。
