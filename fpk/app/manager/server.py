@@ -42,7 +42,7 @@ from settings import Settings
 from tasks import TaskRegistry
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.4.7"
+APP_VERSION = "0.4.8"
 MILESTONE = "M4"
 
 # 限制
