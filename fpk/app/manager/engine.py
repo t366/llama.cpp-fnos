@@ -29,10 +29,14 @@ ERROR = "error"
 
 LOG_MAX_LINES = 2000          # 内存环形缓冲行数（tail 上限）
 LOG_FILE_MAX = 5 * 1024 * 1024  # 落盘日志超过 5MB 时轮转
-START_TIMEOUT = 90            # 等待 /health 就绪秒数（模型加载可能很慢）
+START_TIMEOUT = 90            # /health 就绪等待秒数；超时后降级为端口连通性判定
 POLL_INTERVAL = 1.0           # /health 轮询间隔（CGI 轮询约束 ≥1s）
 CRASH_BACKOFF = (2, 5, 10, 30, 60)  # 连续崩溃重启的退避序列（秒）
 MAX_CRASH_RESTARTS = 5        # 连续崩溃自动重启上限（确定性错误不应无限循环）
+
+# 健康探测禁用系统代理：NAS 配置了 http_proxy 时，对 127.0.0.1 的探测会被
+# 转发给代理而必然失败（服务实际可用），必须直连（ProxyHandler({}) 绕过）
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class Engine:
@@ -252,7 +256,12 @@ class Engine:
                 fh.close()
 
     def _await_ready(self, proc, gen):
-        """轮询 127.0.0.1:<port>/health，就绪则置 RUNNING；失败/超时交给守护线程定论。"""
+        """轮询 127.0.0.1:<port>/health，就绪则置 RUNNING。
+
+        探测禁用系统代理（127.0.0.1 走代理必然失败）。健康端点始终探不通时
+        降级判定：进程存活且推理端口已监听（TCP 可连）即视为 RUNNING——
+        服务实际可用，仅 /health 被代理/防火墙拦截或端点行为变化。
+        """
         port = self.settings.value("inference_port")
         url = "http://127.0.0.1:%d/health" % port
         deadline = time.time() + START_TIMEOUT
@@ -263,7 +272,7 @@ class Engine:
                 if self._state != STARTING:
                     return
             try:
-                with urllib.request.urlopen(url, timeout=2) as resp:
+                with _NO_PROXY_OPENER.open(url, timeout=2) as resp:
                     if resp.status == 200:
                         with self._lock:
                             if gen == self._generation and proc is self._proc:
@@ -274,9 +283,37 @@ class Engine:
             except Exception:
                 pass
             time.sleep(POLL_INTERVAL)
-        # 超时：不强行定性，守护线程在进程真正退出时处理；
-        # 但给出提示便于排查（模型大时加载超过 START_TIMEOUT 仍可后续转 RUNNING）
-        self.log_line("[manager] 已等待 %ds 未就绪，仍在等待健康检查…" % START_TIMEOUT)
+        # 健康端点超时：降级判定端口连通性；通则按 RUNNING（服务可用），
+        # 不通则继续等待（大模型加载中端口尚未监听；进程退出由守护线程定论）
+        self.log_line("[manager] /health 等待 %ds 未成功，降级为端口探测…" % START_TIMEOUT)
+        while True:
+            with self._lock:
+                if gen != self._generation or proc is not self._proc:
+                    return
+                if self._state != STARTING:
+                    return
+            if proc.poll() is not None:
+                return  # 进程已退出，守护线程定论
+            if self._tcp_ok(port):
+                with self._lock:
+                    if (gen == self._generation and proc is self._proc
+                            and self._state == STARTING):
+                        self._state = RUNNING
+                        self._crash_count = 0
+                        self.log_line("[manager] /health 超时但端口已监听，"
+                                      "按运行中处理（健康检查降级，服务可用）")
+                return
+            time.sleep(POLL_INTERVAL)
+
+    @staticmethod
+    def _tcp_ok(port):
+        """推理端口 TCP 连通性测试（健康检查降级用）。"""
+        try:
+            s = socket.create_connection(("127.0.0.1", int(port)), timeout=2)
+            s.close()
+            return True
+        except OSError:
+            return False
 
     def _guard(self, proc, gen):
         """等待进程退出；若非手动停止且开启自动重启，则按退避重启。"""
@@ -310,9 +347,16 @@ class Engine:
         self.log_line("[manager] %ds 后自动重启（第 %d 次崩溃）" % (delay, self._crash_count))
         self._state_stash_for_backoff()
         time.sleep(delay)
+        with self._lock:
+            # 退避期间用户手动停止/启动（代次变化）则放弃本次自动重启：
+            # 否则旧守护线程会与新状态互相踩踏（误导日志、手动停止后仍被拉起）
+            if gen != self._generation or self._manual_stop:
+                return
         ok, err = self.start(reset_crashes=False)
         if not ok:
             with self._lock:
+                if gen != self._generation:
+                    return  # 期间已被手动接管，失败无需定性、也不刷误导日志
                 self._state = ERROR
             self.log_line("[manager] 自动重启失败：%s" % err)
 
