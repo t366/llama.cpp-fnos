@@ -46,12 +46,14 @@ $out = Join-Path $dist ("llamacpp-" + $version + "-" + $Platform + ".fpk")
 Move-Item $src $out -Force
 $hash = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
 $line = $hash + "  " + (Split-Path -Leaf $out)
+# 注意：Get-Content 只读到一行时返回标量，$scalar + $string 会把两行粘成一行；
+# 必须 @() 强制数组，且用 WriteAllText 写 LF 换行并保证末尾换行（兼容 sha256sum -c）
 $sums = Join-Path $dist "SHA256SUMS"
+$lines = @()
 if (Test-Path $sums) {
-    $others = Get-Content $sums | Where-Object { $_ -and ($_ -notmatch [regex]::Escape((Split-Path -Leaf $out))) }
-    ($others + $line) | Set-Content $sums -Encoding ASCII
-} else {
-    $line | Set-Content $sums -Encoding ASCII
+    $lines = @(Get-Content $sums | Where-Object { $_ -and ($_ -notmatch [regex]::Escape((Split-Path -Leaf $out))) })
 }
+$lines += $line
+[IO.File]::WriteAllText($sums, (($lines -join "`n") + "`n"), [Text.Encoding]::ASCII)
 Write-Output ("产物: " + $out + " (" + [math]::Round((Get-Item $out).Length / 1MB, 1) + " MB)")
 Write-Output ("SHA256: " + $hash)
