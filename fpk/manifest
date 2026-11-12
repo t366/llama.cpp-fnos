@@ -1,5 +1,5 @@
 appname               = llamacpp
-version               = 0.4.8
+version               = 0.4.9
 display_name          = llama.cpp
 desc                  = 本地大模型推理服务：llama.cpp 原生二进制运行（无 Docker），提供 OpenAI 兼容 API、聊天界面与模型管理，支持 NVIDIA GPU 自动加速。
 platform              = x86
@@ -14,4 +14,4 @@ desktop_applaunchname = llamacpp.Application
 service_port          = 18080
 checkport             = false
 ctl_stop              = true
-changelog             = 新增 cuda-12.8-x86_64 GPU 变体：基于 llama.cpp b12220 以 CUDA 12.8 自建编译（含 cudart/cublas/nccl 运行库），面向 Vulkan 变体未覆盖或性能不理想的 NVIDIA 显卡——尤其 Pascal 架构（GTX 10 系，CUDA 13 起官方已不再支持，12.8 为其最后可用版本）；变体页可手动下载安装，与 Vulkan/CPU 变体自由切换。
+changelog             = 新增 Embedding 向量模型支持：设置页新增「运行模式」可选对话或 Embedding（--embedding，仅暴露 /v1/embeddings 接口，用于向量检索等场景），并可配置 mmproj 多模态投影 GGUF（--mmproj）；状态页同步显示运行模式与 mmproj 加载状态。

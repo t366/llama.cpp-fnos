@@ -20,6 +20,8 @@ DEFAULTS = {
     "ngl": 0,                 # GPU offload 层数（--n-gpu-layers；CPU 变体保持 0）
     "api_key": "",            # 为空则不启用鉴权（llama-server --api-key）
     "model": "",              # 当前 GGUF 模型绝对路径
+    "mode": "chat",           # 运行模式：chat = 对话模型；embedding = 向量检索（--embedding）
+    "mmproj_model": "",       # 多模态投影 GGUF 路径（--mmproj）；空 = 不加载
     "variant": "",            # 引擎变体目录名；空 = 自动（硬件检测推荐）
     "auto_restart": True,     # 崩溃自动重启
     "models_dir": "",         # 模型扫描目录；空 = 数据目录下 models/
@@ -31,7 +33,8 @@ DEFAULTS = {
 # 允许写入的字段与类型
 _TYPES = {
     "inference_port": int, "bind": str, "ctx_size": int, "threads": int,
-    "ngl": int, "api_key": str, "model": str, "variant": str,
+    "ngl": int, "api_key": str, "model": str, "mode": str,
+    "mmproj_model": str, "variant": str,
     "auto_restart": bool, "models_dir": str,
     "download_source": str, "mirror_base": str, "market_source": str,
 }
@@ -45,6 +48,7 @@ _RANGE_CHECKS = (
 )
 
 _BIND_CHOICES = ("0.0.0.0", "127.0.0.1")
+_MODE_CHOICES = ("chat", "embedding")
 
 
 class Settings:
@@ -96,6 +100,11 @@ class Settings:
                 return False, "%s 需在 %d~%d 之间" % (key, lo, hi)
         if "bind" in clean and clean["bind"] not in _BIND_CHOICES:
             return False, "bind 仅支持 0.0.0.0 或 127.0.0.1"
+        if "mode" in clean and clean["mode"] not in _MODE_CHOICES:
+            return False, "mode 仅支持 chat 或 embedding"
+        if "mmproj_model" in clean and clean["mmproj_model"]:
+            if not clean["mmproj_model"].lower().endswith(".gguf"):
+                return False, "mmproj_model 必须是 .gguf 文件路径（可留空）"
         if "download_source" in clean and clean["download_source"] not in ("github", "gitea"):
             return False, "download_source 仅支持 github 或 gitea"
         if "market_source" in clean and clean["market_source"] not in ("modelscope", "hf"):

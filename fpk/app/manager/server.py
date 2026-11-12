@@ -42,8 +42,7 @@ from settings import Settings
 from tasks import TaskRegistry
 
 APP_NAME = "llamacpp"
-APP_VERSION = "0.4.8"
-MILESTONE = "M4"
+APP_VERSION = "0.4.9"
 
 # 限制
 BODY_MAX_BYTES = 1024 * 1024      # 请求体上限 1MB（设计 §4.6）
@@ -212,7 +211,6 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True,
             "app": APP_NAME,
             "version": APP_VERSION,
-            "milestone": MILESTONE,
             "service": "manager",
             "engine": engine.status(),
             "hardware_summary": hardware.summary_text(hw),
@@ -493,8 +491,8 @@ def main():
     atexit.register(_terminate_engine_and_exit)
 
     server = ManagerServer((args.host, args.port), Handler)
-    print("[%s] manager %s (%s) listening on %s:%d, app=%s, data=%s"
-          % (APP_NAME, APP_VERSION, MILESTONE, args.host, args.port,
+    print("[%s] manager %s listening on %s:%d, app=%s, data=%s"
+          % (APP_NAME, APP_VERSION, args.host, args.port,
              args.app_dir, args.data_dir),
           flush=True)
     try:

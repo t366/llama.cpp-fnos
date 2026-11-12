@@ -18,8 +18,6 @@ import threading
 import time
 import urllib.request
 
-from settings import Settings  # noqa: F401  仅类型说明用途
-
 # 引擎状态
 STOPPED = "stopped"
 STARTING = "starting"
@@ -107,6 +105,12 @@ class Engine:
             cmd += ["--n-gpu-layers", str(cfg["ngl"])]
         if cfg.get("api_key"):
             cmd += ["--api-key", cfg["api_key"]]
+        # Embedding 模式：llama-server 仅暴露 /v1/embeddings，不加载对话采样参数
+        if cfg.get("mode") == "embedding":
+            cmd += ["--embedding"]
+        # 多模态投影模型（视觉编码）；chat 与 embedding 模式均可按需加载
+        if cfg.get("mmproj_model"):
+            cmd += ["--mmproj", cfg["mmproj_model"]]
         return cmd
 
     def _check_port_free(self, host, port):
@@ -141,6 +145,9 @@ class Engine:
             model, merr = self._resolve_model(cfg.get("model"))
             if merr:
                 return False, merr
+            mmproj = cfg.get("mmproj_model")
+            if mmproj and not os.path.isfile(mmproj):
+                return False, "mmproj 文件不存在：%s" % mmproj
             perr = self._check_port_free(cfg.get("bind", "0.0.0.0"),
                                          cfg.get("inference_port", 8080))
             if perr:
@@ -378,6 +385,8 @@ class Engine:
                 "port": cfg.get("inference_port"),
                 "bind": cfg.get("bind"),
                 "model": cfg.get("model") or None,
+                "mode": cfg.get("mode") or "chat",
+                "mmproj_model": cfg.get("mmproj_model") or None,
                 "pid": proc.pid if proc else None,
                 "uptime_s": (int(time.time() - self._started_at)
                              if self._state == RUNNING and self._started_at else None),

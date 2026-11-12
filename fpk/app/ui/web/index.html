@@ -16,7 +16,7 @@
   header.bar {
     display: flex; align-items: center; gap: 10px; padding: 4px 2px 14px;
   }
-  header.bar .logo { font-size: 26px; }
+  header.bar .logo { display: block; }
   header.bar h1 { font-size: 18px; margin: 0; flex: 1; }
   header.bar .ver { color: #98a2b0; font-size: 12px; }
   nav.tabs { display: flex; gap: 4px; background: #e6e9ef; padding: 4px; border-radius: 10px; margin-bottom: 16px; }
@@ -202,7 +202,29 @@
 <body>
 <div class="wrap">
   <header class="bar">
-    <div class="logo">🦙</div>
+    <svg class="logo" width="28" height="28" viewBox="0 0 64 64" aria-hidden="true">
+      <defs>
+        <linearGradient id="lg-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#1a3a54"/>
+          <stop offset="1" stop-color="#12544c"/>
+        </linearGradient>
+      </defs>
+      <rect width="64" height="64" rx="14" fill="url(#lg-bg)"/>
+      <ellipse cx="24.5" cy="20" rx="4.5" ry="8" fill="#f7f1e3" transform="rotate(10 24.5 20)"/>
+      <ellipse cx="39.5" cy="20" rx="4.5" ry="8" fill="#f7f1e3" transform="rotate(-10 39.5 20)"/>
+      <ellipse cx="25" cy="21" rx="2.2" ry="5" fill="#cbad84" transform="rotate(10 25 21)"/>
+      <ellipse cx="39" cy="21" rx="2.2" ry="5" fill="#cbad84" transform="rotate(-10 39 21)"/>
+      <ellipse cx="32" cy="36" rx="16.5" ry="18.5" fill="#f7f1e3"/>
+      <circle cx="26" cy="33" r="1.8" fill="#33291f"/>
+      <circle cx="38" cy="33" r="1.8" fill="#33291f"/>
+      <ellipse cx="22" cy="38.5" rx="3.4" ry="2.2" fill="#f2b28c" opacity=".5"/>
+      <ellipse cx="42" cy="38.5" rx="3.4" ry="2.2" fill="#f2b28c" opacity=".5"/>
+      <path d="M27 40 Q32 44.5 37 40" fill="none" stroke="#33291f" stroke-width="1.6" stroke-linecap="round"/>
+      <line x1="46.5" y1="56.5" x2="55" y2="52.5" stroke="#22a069" stroke-width="1.6"/>
+      <circle cx="46.5" cy="56.5" r="1.8" fill="#3ecf8e"/>
+      <circle cx="51" cy="54.5" r="2.4" fill="#3ecf8e"/>
+      <circle cx="55" cy="52.5" r="3.2" fill="#3ecf8e"/>
+    </svg>
     <h1>llama.cpp 本地大模型</h1>
     <div class="ver" id="ver"></div>
   </header>
@@ -335,6 +357,19 @@
         <label>模型路径</label>
         <input type="text" id="fModel" placeholder="/vol1/.../model-Q4_K_M.gguf">
         <div class="hint">GGUF 文件绝对路径；也可填仅含一个 GGUF 的目录（自动选用），含多个时需指定文件</div>
+      </div>
+      <div class="form-row">
+        <label>运行模式</label>
+        <select id="fMode">
+          <option value="chat">对话模型（Chat）</option>
+          <option value="embedding">Embedding 向量（/v1/embeddings）</option>
+        </select>
+        <div class="hint">Embedding 模式运行向量模型（如 embeddinggemma），仅提供 /v1/embeddings 接口，不可对话</div>
+      </div>
+      <div class="form-row">
+        <label>mmproj 路径</label>
+        <input type="text" id="fMmproj" placeholder="留空 = 不加载；如 /vol1/.../mmproj-F16.gguf">
+        <div class="hint">多模态投影 GGUF（--mmproj），视觉模型按需填写；对话与 Embedding 模式均可加载</div>
       </div>
       <div class="form-row">
         <label>推理端口</label>
@@ -470,6 +505,8 @@
       ["变体", e.variant],
       ["二进制目录", e.variant_dir || "未找到"],
       ["模型", e.model || "未配置"],
+      ["运行模式", e.mode === "embedding" ? "Embedding 向量" : "对话模型"],
+      ["mmproj", e.mmproj_model || "未加载"],
       ["监听", e.bind + ":" + e.port],
       ["进程 PID", e.pid || "—"],
       ["运行时长", e.uptime_s !== null && e.uptime_s !== undefined ? fmtDur(e.uptime_s) : "—"],
@@ -507,7 +544,7 @@
   function refreshStatus() {
     return api("GET", "api/status").then(function (d) {
       state.engine = d.engine;
-      $("ver").textContent = "v" + d.version + " · " + d.milestone;
+      $("ver").textContent = "v" + d.version;
       renderEngine(d.engine);
       if (!state.settings) { /* settings 由设置页独立拉取 */ }
     }).catch(function (e) {
@@ -666,6 +703,8 @@
   function fillSettings(s) {
     state.settings = s;
     $("fModel").value = s.model || "";
+    $("fMode").value = s.mode || "chat";
+    $("fMmproj").value = s.mmproj_model || "";
     $("fPort").value = s.inference_port;
     $("fBind").value = s.bind;
     $("fCtx").value = s.ctx_size;
@@ -697,6 +736,8 @@
   $("btnSave").addEventListener("click", function () {
     var payload = {
       model: $("fModel").value.trim(),
+      mode: $("fMode").value,
+      mmproj_model: $("fMmproj").value.trim(),
       inference_port: parseInt($("fPort").value, 10),
       bind: $("fBind").value,
       ctx_size: parseInt($("fCtx").value, 10),
