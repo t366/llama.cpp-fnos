@@ -4,10 +4,11 @@
 #   → http://<gitea>/<owner>/<repo>/releases/download/<tag>/<file>
 # 用法（PowerShell 5.1+）：
 #   .\scripts\sync-mirror-gitea.ps1 -Token <gitea_token>
-#   可选：-Tag b12229 -GiteaBase http://192.168.0.114:3000 -Owner T366 -Repo llama.cpp-fnos
+#   可选：-Tag b12220 -GiteaBase http://192.168.0.114:3000 -Owner T366 -Repo llama.cpp-fnos
+#   Tag 默认与 fpk/app/manager/variants.py 的 PINNED_TAG 保持一致
 param(
     [Parameter(Mandatory = $true)][string]$Token,
-    [string]$Tag = "b12229",
+    [string]$Tag = "b12220",
     [string]$GiteaBase = "http://192.168.0.114:3000",
     [string]$Owner = "T366",
     [string]$Repo = "llama.cpp-fnos",

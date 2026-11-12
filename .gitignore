@@ -1,18 +1,20 @@
-# 构建产物与本地工具
+# 构建产物（dist-fpk 由 scripts/build-fpk.ps1 生成，可随时重建）
 dist-fpk/
-tools/
-ref/
-demoapp/
 
-# vendor 的 llama.cpp 二进制（构建时由 scripts/vendor-binaries.ps1 下载填充）
+# vendor 的 llama.cpp 二进制（构建时由 scripts/vendor-binaries.py 下载填充）
 fpk/app/bin/
+
+# 下载/镜像脚本缓存与临时目录
+build/
+.gh-cache/
+scripts/.gh-cache/
 
 # Python
 __pycache__/
 *.pyc
 
-# 本地杂物
+# 本地杂物与 IDE
 *.log
 .DS_Store
-
-build/
+.trae/
+.screenshots/

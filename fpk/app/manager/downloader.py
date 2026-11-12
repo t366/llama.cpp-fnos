@@ -17,7 +17,6 @@
 
 import os
 import socket
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -207,27 +206,3 @@ def download(url, dest, *, extra_host_suffixes=(), progress=None, cancel=None):
 
 def _finalize(part, dest):
     os.replace(part, dest)
-
-
-def iter_file_lines(path):
-    """读取文本文件行（市场清单等小工具用途，预留）。"""
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            yield line.rstrip("\n")
-
-
-class ProgressThrottle:
-    """线程安全的进度记录器：供任务表轮询读取。"""
-
-    def __init__(self, on_update):
-        self._lock = threading.Lock()
-        self._on_update = on_update
-        self.received = 0
-        self.total = None
-
-    def __call__(self, received, total):
-        with self._lock:
-            self.received = received
-            self.total = total
-        if self._on_update:
-            self._on_update(received, total)

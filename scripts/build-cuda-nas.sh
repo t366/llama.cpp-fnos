@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # llama.cpp b12220 CUDA 12.8 变体 NAS Docker 编译脚本
 # 用法（SSH 到 NAS）：
+#   export GITEA_TOKEN=<gitea_token>        # 必需：私有仓库下载/上传令牌
 #   bash build-cuda-nas.sh                  # 编译 + 宿主验证
 #   UPLOAD=1 bash build-cuda-nas.sh         # 编译 + 验证 + 上传 Gitea（验证通过才上传）
-# 可调（环境变量）：WORK / CUDA_ARCH=61 / JOBS / DOCKER_IMAGE / SUDO_DOCKER
+# 可调（环境变量）：GITEA_TOKEN / WORK / CUDA_ARCH=61 / JOBS / DOCKER_IMAGE / SUDO_DOCKER
 # 说明：
 # - 源码与编译目录挂载在宿主 $WORK/src，容器销毁不丢产物；重跑时若
 #   build/bin/llama-server 已存在则跳过编译直接打包（增量模式）
 # - 编译容器无 NVIDIA 驱动：容器内 --version 借 stub 库运行，失败不致命；
 #   真正的运行验证在宿主 NAS（有驱动）上进行，通过后才允许上传
+# - 令牌经 GITEA_TOKEN 环境变量注入，不要写进脚本提交到仓库
 set -euo pipefail
 
 TAG=b12220                       # 与 variants.py PINNED_TAG 一致
 GITEA_RAW=http://192.168.0.114:3000/T366/llama.cpp-fnos
 GITEA_API=http://192.168.0.114:3000/api/v1/repos/T366/llama.cpp-fnos
-TOKEN=REDACTED_GITEA_TOKEN
+TOKEN=${GITEA_TOKEN:?请先 export GITEA_TOKEN=<gitea 令牌>（私有仓库下载/上传均需要）}
 
 WORK=${WORK:-$(pwd)/llamacpp-cuda-build}
 CUDA_ARCH=${CUDA_ARCH:-61}

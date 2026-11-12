@@ -1,4 +1,4 @@
-﻿# 打包 fpk：校验结构与平台 → fnpack build → dist-fpk + SHA256SUMS
+﻿# 打包 fpk：校验结构与平台 → pack-fpk.py（纯 Python 打包器）→ dist-fpk + SHA256SUMS
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\build-fpk.ps1               # x86（默认）
 #   powershell -ExecutionPolicy Bypass -File scripts\build-fpk.ps1 -Platform arm # arm（M5：需先 python scripts\vendor-binaries.py --arch aarch64 且 manifest platform 改为 arm）

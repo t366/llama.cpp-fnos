@@ -119,14 +119,6 @@ class TaskRegistry:
         items.reverse()  # 新任务在前
         return items
 
-    def running_count(self, kind=None):
-        n = 0
-        with self._lock:
-            for t in self._tasks.values():
-                if t["state"] in (QUEUED, RUNNING) and (kind is None or t["kind"] == kind):
-                    n += 1
-        return n
-
     def _prune_locked(self):
         """控制内存占用：终态任务超过配额时从最旧开始丢弃。"""
         final = [t for t in self._tasks.values() if t["state"] in FINAL_STATES]
