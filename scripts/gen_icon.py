@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""生成 llama.cpp-fnos 应用图标（fpk/app/ui/images/icon_256.png / icon_64.png）。
+"""生成 llama.cpp-fnos 应用图标，共 4 个文件：
+
+- fpk/ICON.PNG / fpk/ICON_256.PNG     fpk 包根目录（飞牛应用中心 / 桌面展示用）
+- fpk/app/ui/images/icon_256.png / icon_64.png   Web UI 图片
 
 设计：squircle 圆角矩形 + 对角渐变深青背景，居中现代扁平 llama 头，
 右下角绿色三点连线点缀（呼应向量检索 / API 连接）。
@@ -26,6 +29,7 @@ GREEN_DIM = (34, 160, 105, 255)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(ROOT, "fpk", "app", "ui", "images")
+FPK_DIR = os.path.join(ROOT, "fpk")
 
 
 def diag_gradient(size, c1, c2):
@@ -132,7 +136,14 @@ def main():
     p64 = os.path.join(OUT_DIR, "icon_64.png")
     icon.resize((256, 256), Image.LANCZOS).save(p256)
     icon.resize((256, 256), Image.LANCZOS).resize((64, 64), Image.LANCZOS).save(p64)
-    print("生成完成 ->", p256)
+    # fpk 包根目录：应用中心 / 桌面图标（文件名固定全大写）
+    pfpk256 = os.path.join(FPK_DIR, "ICON_256.PNG")
+    pfpk64 = os.path.join(FPK_DIR, "ICON.PNG")
+    icon.resize((256, 256), Image.LANCZOS).save(pfpk256)
+    icon.resize((256, 256), Image.LANCZOS).resize((64, 64), Image.LANCZOS).save(pfpk64)
+    print("生成完成 ->", pfpk256)
+    print("           ", pfpk64)
+    print("           ", p256)
     print("           ", p64)
 
 
